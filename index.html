@@ -3,12 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>PDF Splitter — split big PDFs into parts by size</title>
+<title>PDF Toolkit — split and merge PDFs without changing them</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
 <style>
 :root {
   --paper: #EEF1F4; --sheet: #FFFFFF; --ink: #16202B; --muted: #5B6775; --line: #CFD6DE;
@@ -76,6 +77,29 @@ button.ghost { background: transparent; color: var(--ink); border: 1px solid var
 .parts li.over { border-color: var(--warn); }
 .parts li.over small { color: var(--warn); }
 .parts li.saved button { color: var(--good); border-color: var(--good); }
+.modes { display: grid; gap: 8px; margin-top: 24px; }
+.mode { display: grid; grid-template-columns: 22px 1fr; gap: 12px; align-items: start; background: var(--sheet); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; cursor: pointer; }
+.mode:has(input:checked) { border-color: var(--signal); box-shadow: inset 0 0 0 1px var(--signal); }
+.mode:has(input:focus-visible) { outline: 3px solid var(--signal); outline-offset: 2px; }
+.mode input { margin: 4px 0 0; accent-color: var(--signal); width: 18px; height: 18px; }
+.mode b { font-weight: 600; display: block; }
+.mode small { color: var(--muted); font-size: 0.88rem; display: block; margin-top: 2px; }
+.sub { margin: 4px 0 0 34px; display: none; gap: 8px; }
+.sub.show { display: grid; }
+.sub .mode { padding: 10px 14px; }
+.tabs { display: inline-flex; background: var(--sheet); border: 1px solid var(--line); border-radius: 12px; padding: 4px; gap: 4px; margin: 0 0 28px; }
+.tabs button { background: transparent; color: var(--muted); padding: 10px 22px; border-radius: 9px; font-size: 1rem; }
+.tabs button[aria-selected="true"] { background: var(--signal); color: var(--on-signal); }
+.mlist { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 8px; counter-reset: m; }
+.mlist li { counter-increment: m; display: grid; grid-template-columns: 2.2em 1fr auto; gap: 10px; align-items: center; background: var(--sheet); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.mlist li::before { content: counter(m); font-family: var(--display); font-weight: 800; font-size: 1.2rem; color: var(--signal); text-align: center; }
+.mlist .nm { min-width: 0; }
+.mlist .nm b { font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mlist .nm small { color: var(--muted); font-size: 0.88rem; }
+.mlist .ctl { display: flex; gap: 4px; }
+.mlist .ctl button { background: transparent; color: var(--ink); border: 1px solid var(--line); padding: 6px 10px; font-size: 0.9rem; border-radius: 8px; }
+.mlist .ctl button:disabled { opacity: .3; }
+.mtotal { color: var(--muted); font-size: 0.93rem; margin: 12px 0 0; min-height: 1.4em; }
 .error { display: none; margin-top: 20px; padding: 14px 16px; border-radius: 10px; border: 1px solid var(--warn); background: var(--sheet); }
 .error.show { display: block; }
 .facts { margin-top: 56px; padding-top: 28px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.93rem; }
@@ -87,8 +111,15 @@ button.ghost { background: transparent; color: var(--ink); border: 1px solid var
 </head>
 <body>
 <main>
-  <h1>Split a big PDF into&nbsp;parts that fit.</h1>
-  <p class="lede">Every slide is copied exactly as it is. Nothing is re-compressed, resized or recoloured. Pages stay in order, and each part stays under the size you choose. Everything runs in your browser.</p>
+  <h1 id="headline">Split a big PDF into&nbsp;parts that fit.</h1>
+  <p class="lede" id="lede">Pages stay in order and each part stays under the size you choose. Pick “For Canva” if you’ll import the parts into Canva — every slide then comes back looking exactly as it did. Everything runs in your browser.</p>
+
+  <div class="tabs" role="tablist" aria-label="Tool">
+    <button role="tab" id="tab-split" aria-selected="true" aria-controls="panel-split">Split</button>
+    <button role="tab" id="tab-merge" aria-selected="false" aria-controls="panel-merge">Merge</button>
+  </div>
+
+  <div id="panel-split" role="tabpanel" aria-labelledby="tab-split">
 
   <label class="drop" id="drop">
     <input type="file" id="file" accept="application/pdf,.pdf" aria-label="Choose a PDF file">
@@ -96,6 +127,29 @@ button.ghost { background: transparent; color: var(--ink); border: 1px solid var
     <span>Files of 200 MB and more work best in Chrome, Edge or Firefox on a computer</span>
     <div class="file-line" id="fileLine"></div>
   </label>
+
+  <div class="modes" role="radiogroup" aria-label="Output type">
+    <label class="mode">
+      <input type="radio" name="mode" value="canva" checked>
+      <span><b>For Canva: each slide as a picture</b>
+        <small>Canva imports every slide exactly as it looks, Hindi text included. Text becomes part of the picture and can't be edited.</small></span>
+    </label>
+    <div class="sub show" id="qualityBox">
+      <label class="mode">
+        <input type="radio" name="quality" value="jpeg" checked>
+        <span><b>Looks identical</b><small>4K resolution, JPEG quality 95. No visible difference, sensible file sizes.</small></span>
+      </label>
+      <label class="mode">
+        <input type="radio" name="quality" value="lossless">
+        <span><b>Pixel-perfect</b><small>4K resolution, lossless. Every pixel exact, but files are several times bigger, so you get more parts.</small></span>
+      </label>
+    </div>
+    <label class="mode">
+      <input type="radio" name="mode" value="original">
+      <span><b>Original PDF</b>
+        <small>Pages copied byte-for-byte, text stays selectable. Best for viewing, printing and sharing, but Canva's import may garble Hindi text.</small></span>
+    </label>
+  </div>
 
   <div class="limit">
     <label for="limit">Each part up to</label>
@@ -114,13 +168,41 @@ button.ghost { background: transparent; color: var(--ink); border: 1px solid var
     <div id="result"></div>
   </div>
 
-  <div class="error" id="error" role="alert"></div>
 
   <div class="facts">
-    <h2>Why splitting keeps quality perfect</h2>
+    <h2>Why Canva changes text, and how “For Canva” avoids it</h2>
+    <p>When Canva imports a PDF, it re-types the text with its own fonts, and Hindi conjuncts and matras get lost. In “For Canva” mode each slide is a single high-resolution picture, so there is no text for Canva to re-type: what you see is exactly what comes back.</p>
+    <h2>Original PDF mode</h2>
     <p>Each page is moved into a new file with its images, fonts and graphics byte-for-byte identical. If several slides share an image or font, each part gets its own copy, so every part opens on its own.</p>
     <p>A single slide bigger than your limit can't be split further without changing it. It gets a part of its own, marked in orange.</p>
   </div>
+  </div>
+
+  <div id="panel-merge" role="tabpanel" aria-labelledby="tab-merge" hidden>
+    <label class="drop" id="mdrop">
+      <input type="file" id="mfile" accept="application/pdf,.pdf" multiple aria-label="Choose PDF files to merge">
+      <strong>Drop PDFs here or click to choose</strong>
+      <span>Pick several at once, or keep adding more</span>
+    </label>
+    <ol class="mlist" id="mlist" aria-label="Files to merge, in order"></ol>
+    <p class="mtotal" id="mtotal"></p>
+    <div class="actions">
+      <button id="mgo" disabled>Merge PDFs</button>
+      <button class="ghost" id="mclear" hidden>Clear list</button>
+    </div>
+    <div class="work" id="mwork" aria-live="polite">
+      <div class="status" id="mstatus"></div>
+      <div class="progress"><div id="mprogressFill"></div></div>
+      <div id="mresult"></div>
+    </div>
+    <div class="facts">
+      <h2>Nothing changes</h2>
+      <p>Every page is copied byte-for-byte, in the order shown. Images, fonts, colours and text stay exactly as they were in each file.</p>
+      <p>The merged file is about as big as all the files added together. If it's too big to send, open the Split tab to cut it into parts.</p>
+    </div>
+  </div>
+
+  <div class="error" id="error" role="alert"></div>
 </main>
 
 <script>
@@ -259,11 +341,112 @@ async function splitPdf(bytes, limitBytes, baseName, progress, onPart) {
   progress(1, "Done");
   return { parts, pages: n };
 }
+
+async function mergePdfs(files, progress) {
+  const { PDFDocument } = PDFLib;
+  const out = await PDFDocument.create();
+  let pages = 0;
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    progress(i / files.length, `Adding ${f.name} (${i + 1} of ${files.length})`);
+    await tick();
+    let src;
+    try { src = await loadSource(new Uint8Array(await f.arrayBuffer())); }
+    catch (e) { throw new UserError(`“${f.name}”: ${e instanceof UserError ? e.message : "couldn't be read."}`); }
+    unhookPageLinks(src);
+    const copied = await out.copyPages(src, src.getPageIndices());
+    copied.forEach(p => out.addPage(p));
+    pages += copied.length;
+  }
+  progress(0.97, "Writing the merged PDF");
+  await tick();
+  out.setProducer("PDF Toolkit");
+  const bytes = await out.save({ useObjectStreams: true, addDefaultPage: false, updateFieldAppearances: false });
+  return { bytes, pages };
+}
+
+// ---- Canva-safe mode: render each slide to a 4K picture, then group pictures into parts ----
+const PDFJS = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
+function loadScript(src) {
+  return new Promise((res, rej) => { const el = document.createElement("script"); el.src = src; el.onload = res; el.onerror = () => rej(new UserError("Couldn't load the page renderer. Check your internet connection and try again.")); document.head.appendChild(el); });
+}
+async function ensurePdfJs() {
+  if (window.pdfjsLib) return;
+  await loadScript(PDFJS + "pdf.worker.min.js");   // runs the renderer on this page
+  await loadScript(PDFJS + "pdf.min.js");
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + "pdf.worker.min.js";
+}
+
+function addPicturePage(doc, data, filter, W, H, pw, ph) {
+  const { pushGraphicsState, popGraphicsState, concatTransformationMatrix, drawObject } = PDFLib;
+  const ctx = doc.context;
+  const ref = ctx.register(ctx.stream(data, { Type: "XObject", Subtype: "Image", Width: W, Height: H, ColorSpace: "DeviceRGB", BitsPerComponent: 8, Filter: filter }));
+  const page = doc.addPage([pw, ph]);
+  const name = page.node.newXObject("Im", ref);
+  page.pushOperators(pushGraphicsState(), concatTransformationMatrix(pw, 0, 0, ph, 0, 0), drawObject(name), popGraphicsState());
+}
+
+async function splitAsPictures(bytes, limitBytes, baseName, lossless, progress, onPart) {
+  const { PDFDocument } = PDFLib;
+  progress(0.01, "Loading the page renderer");
+  await ensurePdfJs();
+  let pdf;
+  try { pdf = await window.pdfjsLib.getDocument({ data: bytes, isEvalSupported: false, disableFontFace: true, useSystemFonts: false, verbosity: 0 }).promise; }
+  catch (e) {
+    if (e && e.name === "PasswordException") throw new UserError("This PDF is password-protected. Remove the protection first, then try again.");
+    throw new UserError("This file couldn't be read as a PDF. It may be damaged or not a PDF at all.");
+  }
+  const n = pdf.numPages, budget = limitBytes * 0.985, parts = [];
+  let cur = null;
+  const finish = async () => {
+    progress((cur.end) / n, `Saving part ${parts.length + 1}`);
+    const out = await cur.doc.save({ useObjectStreams: true, addDefaultPage: false });
+    const part = { start: cur.start, end: cur.end, bytes: out, over: out.length > limitBytes };
+    parts.push(part); onPart && onPart(part, parts.length);
+    cur = null;
+  };
+  for (let i = 1; i <= n; i++) {
+    progress((i - 1) / n, `Drawing slide ${i} of ${n}`);
+    const page = await pdf.getPage(i);
+    const vp1 = page.getViewport({ scale: 1 });
+    let scale = 3840 / Math.max(vp1.width, vp1.height);
+    scale = Math.min(scale, Math.sqrt(16.5e6 / (vp1.width * vp1.height)));
+    const vp = page.getViewport({ scale });
+    const W = Math.max(1, Math.round(vp.width)), H = Math.max(1, Math.round(vp.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = H;
+    const cx = canvas.getContext("2d", { willReadFrequently: lossless });
+    cx.fillStyle = "#fff"; cx.fillRect(0, 0, W, H);
+    await page.render({ canvasContext: cx, viewport: vp, background: "rgb(255,255,255)" }).promise;
+    let data, filter;
+    if (lossless) {
+      const px = cx.getImageData(0, 0, W, H).data;
+      const rgb = new Uint8Array(W * H * 3);
+      for (let p = 0, q = 0; p < px.length; p += 4, q += 3) { rgb[q] = px[p]; rgb[q + 1] = px[p + 1]; rgb[q + 2] = px[p + 2]; }
+      data = pako.deflate(rgb, { level: 6 }); filter = "FlateDecode";
+    } else {
+      const blob = await new Promise(r => canvas.toBlob(r, "image/jpeg", 0.95));
+      data = new Uint8Array(await blob.arrayBuffer()); filter = "DCTDecode";
+    }
+    canvas.width = canvas.height = 0;
+    page.cleanup();
+    const cost = data.length + 1200;
+    if (cur && cur.end > cur.start && cur.size + cost > budget) await finish();
+    if (!cur) { const doc = await PDFDocument.create(); doc.setTitle(`${baseName} (part ${parts.length + 1})`); doc.setProducer("PDF Splitter"); cur = { doc, start: i - 1, end: i - 1, size: 3000 }; }
+    addPicturePage(cur.doc, data, filter, W, H, vp1.width, vp1.height);
+    cur.size += cost; cur.end = i;
+    await tick();
+  }
+  if (cur) await finish();
+  await pdf.destroy();
+  progress(1, "Done");
+  return { parts, pages: n };
+}
 // ============ ENGINE END ============
 
 const $ = id => document.getElementById(id);
 const fmt = b => b >= 1e9 ? (b / 1e9).toFixed(2) + " GB" : b >= 1e6 ? (b / 1e6).toFixed(1) + " MB" : (b / 1e3).toFixed(0) + " KB";
-let file = null, parts = [], busy = false;
+let file = null, parts = [], busy = false, lastMode = "original";
 
 function setFile(f) {
   if (!f) return;
@@ -279,24 +462,32 @@ const drop = $("drop");
 ["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
 ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
 drop.addEventListener("drop", e => setFile(e.dataTransfer.files[0]));
+document.querySelectorAll('input[name=mode]').forEach(r => r.addEventListener("change", () => {
+  $("qualityBox").classList.toggle("show", document.querySelector('input[name=mode]:checked').value === "canva");
+}));
 function showError(msg) { $("error").textContent = msg; $("error").classList.add("show"); }
 function hideError() { $("error").classList.remove("show"); }
 const baseName = () => file.name.replace(/\.pdf$/i, "");
-const partName = (p, i, total) => `${baseName()} - Part ${i} of ${total} (pages ${p.start + 1}-${p.end}).pdf`;
+const partName = (p, i, total) => `${baseName()}${lastMode === "canva" ? " - Canva" : ""} - Part ${i} of ${total} (pages ${p.start + 1}-${p.end}).pdf`;
 
 $("go").addEventListener("click", async () => {
   if (!file || busy) return;
   if (typeof PDFLib === "undefined") { showError("The PDF engine didn't load. Check your internet connection and reload the page."); return; }
   const mb = parseFloat($("limit").value);
   if (!(mb > 0)) { showError("Enter a part size in MB, for example 20."); return; }
-  if (file.size <= mb * 1e6) { showError(`This file is already ${fmt(file.size)}, which is under ${mb} MB. No need to split it.`); return; }
+  const mode = document.querySelector('input[name=mode]:checked').value;
+  const lossless = document.querySelector('input[name=quality]:checked').value === "lossless";
+  if (mode === "original" && file.size <= mb * 1e6) { showError(`This file is already ${fmt(file.size)}, which is under ${mb} MB. No need to split it.`); return; }
   busy = true; $("go").disabled = true; hideError();
   $("result").innerHTML = ""; $("work").classList.add("show");
   try {
     $("status").textContent = "Loading file into memory";
     const input = new Uint8Array(await file.arrayBuffer());
-    const res = await splitPdf(input, mb * 1e6, baseName(),
-      (p, m) => { $("progressFill").style.width = (p * 100) + "%"; $("status").textContent = m; });
+    const prog = (p, m) => { $("progressFill").style.width = (p * 100) + "%"; $("status").textContent = m; };
+    const res = mode === "canva"
+      ? await splitAsPictures(input, mb * 1e6, baseName(), lossless, prog)
+      : await splitPdf(input, mb * 1e6, baseName(), prog);
+    lastMode = mode;
     parts = res.parts.map(p => ({ ...p, blob: new Blob([p.bytes], { type: "application/pdf" }), bytes: null }));
     render(res.pages, mb);
   } catch (e) {
@@ -312,7 +503,9 @@ $("go").addEventListener("click", async () => {
 function render(pageCount, mb) {
   const total = parts.length;
   const overs = parts.filter(p => p.over);
-  $("status").textContent = `${pageCount} pages split into ${total} parts. Every slide unchanged.`;
+  $("status").textContent = lastMode === "canva"
+    ? `${pageCount} slides turned into 4K pictures, in ${total} part${total > 1 ? "s" : ""}. Ready to import into Canva.`
+    : `${pageCount} pages split into ${total} parts. Every slide unchanged.`;
   const strip = parts.map((p, i) => `<div id="seg${i}" class="${p.over ? "over" : ""}" style="flex:${p.blob.size}" title="Part ${i + 1}: ${fmt(p.blob.size)}"></div>`).join("");
   const rows = parts.map((p, i) => `
     <li id="row${i}" class="${p.over ? "over" : ""}">
@@ -321,11 +514,11 @@ function render(pageCount, mb) {
       <button class="ghost" data-i="${i}">Download</button>
     </li>`).join("");
   $("result").innerHTML = `
-    <p class="verdict">${total} parts ready</p>
+    <p class="verdict">${total} part${total > 1 ? "s" : ""} ready</p>
     <div class="strip" aria-hidden="true">${strip}</div>
     <div class="actions" style="margin:0 0 16px"><button id="all">Download all ${total} parts as ZIP</button></div>
     <ul class="parts">${rows}</ul>
-    ${overs.length ? `<p class="status" style="margin-top:14px;color:var(--warn)">${overs.length === 1 ? "One slide is" : overs.length + " slides are"} bigger than ${mb} MB by ${overs.length === 1 ? "itself" : "themselves"}. They can't be split smaller without changing the slide.</p>` : ""}`;
+    ${overs.length ? `<p class="status" style="margin-top:14px;color:var(--warn)">${overs.length === 1 ? "One slide is" : overs.length + " slides are"} bigger than ${mb} MB by ${overs.length === 1 ? "itself" : "themselves"}. ${lastMode === "canva" ? "Choose “Looks identical” instead of “Pixel-perfect” to make them smaller." : "They can't be split smaller without changing the slide."}</p>` : ""}`;
   $("result").querySelectorAll("button[data-i]").forEach(b => b.addEventListener("click", () => savePart(+b.dataset.i)));
   $("all").addEventListener("click", saveZip);
 }
@@ -364,6 +557,122 @@ async function saveZip() {
     console.error(e);
     showError("The ZIP couldn't be created, most likely because the browser ran out of memory. Download the parts one by one instead.");
   } finally { btn.textContent = label; btn.disabled = false; }
+}
+
+// ---------- Tabs ----------
+const COPY = {
+  split: ["Split a big PDF into\u00a0parts that fit.", document.getElementById("lede").textContent],
+  merge: ["Join PDFs into one, exactly as they are.", "Add your files, put them in order, and merge. Every page is copied without any change. Everything runs in your browser."]
+};
+function showTab(name) {
+  for (const t of ["split", "merge"]) {
+    const on = t === name;
+    $("tab-" + t).setAttribute("aria-selected", on);
+    $("panel-" + t).hidden = !on;
+  }
+  $("headline").textContent = COPY[name][0];
+  $("lede").textContent = COPY[name][1];
+  hideError();
+}
+$("tab-split").addEventListener("click", () => showTab("split"));
+$("tab-merge").addEventListener("click", () => showTab("merge"));
+document.querySelector(".tabs").addEventListener("keydown", e => {
+  if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+    const next = $("tab-split").getAttribute("aria-selected") === "true" ? "merge" : "split";
+    showTab(next); $("tab-" + next).focus();
+  }
+});
+
+// ---------- Merge ----------
+let mfiles = [], mresult = null, mbusy = false;
+const esc = t => t.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function addMergeFiles(list) {
+  const pdfs = [...list].filter(f => /\.pdf$/i.test(f.name) || f.type === "application/pdf");
+  if (pdfs.length < list.length) showError("Some files were skipped because they aren't PDFs."); else hideError();
+  mfiles.push(...pdfs); mresult = null; renderMerge();
+}
+function renderMerge() {
+  $("mlist").innerHTML = mfiles.map((f, i) => `
+    <li>
+      <span class="nm"><b title="${esc(f.name)}">${esc(f.name)}</b><small>${fmt(f.size)}</small></span>
+      <span class="ctl">
+        <button data-a="up" data-i="${i}" aria-label="Move ${esc(f.name)} up" ${i === 0 ? "disabled" : ""}>↑</button>
+        <button data-a="down" data-i="${i}" aria-label="Move ${esc(f.name)} down" ${i === mfiles.length - 1 ? "disabled" : ""}>↓</button>
+        <button data-a="rm" data-i="${i}" aria-label="Remove ${esc(f.name)}">Remove</button>
+      </span>
+    </li>`).join("");
+  const total = mfiles.reduce((a, f) => a + f.size, 0);
+  $("mtotal").textContent = mfiles.length === 0 ? "" : mfiles.length === 1 ? "Add at least one more PDF to merge." : `${mfiles.length} files, ${fmt(total)} in total`;
+  $("mgo").disabled = mfiles.length < 2 || mbusy;
+  $("mclear").hidden = mfiles.length === 0;
+  if (!mresult) $("mwork").classList.remove("show");
+}
+$("mlist").addEventListener("click", e => {
+  const b = e.target.closest("button[data-a]"); if (!b || mbusy) return;
+  const i = +b.dataset.i, a = b.dataset.a;
+  if (a === "rm") mfiles.splice(i, 1);
+  else { const j = a === "up" ? i - 1 : i + 1; [mfiles[i], mfiles[j]] = [mfiles[j], mfiles[i]]; }
+  mresult = null; renderMerge();
+  const again = $("mlist").querySelector(`button[data-a="${a}"][data-i="${a === "up" ? i - 1 : a === "down" ? i + 1 : i}"]`);
+  if (again && !again.disabled) again.focus();
+});
+$("mfile").addEventListener("change", e => { addMergeFiles(e.target.files); e.target.value = ""; });
+const mdrop = $("mdrop");
+["dragenter", "dragover"].forEach(ev => mdrop.addEventListener(ev, e => { e.preventDefault(); mdrop.classList.add("over"); }));
+["dragleave", "drop"].forEach(ev => mdrop.addEventListener(ev, e => { e.preventDefault(); mdrop.classList.remove("over"); }));
+mdrop.addEventListener("drop", e => addMergeFiles(e.dataTransfer.files));
+$("mclear").addEventListener("click", () => { mfiles = []; mresult = null; renderMerge(); });
+
+$("mgo").addEventListener("click", async () => {
+  if (mfiles.length < 2 || mbusy) return;
+  if (typeof PDFLib === "undefined") { showError("The PDF engine didn't load. Check your internet connection and reload the page."); return; }
+  mbusy = true; $("mgo").disabled = true; hideError();
+  $("mresult").innerHTML = ""; $("mwork").classList.add("show");
+  try {
+    const res = await mergePdfs(mfiles, (p, m) => { $("mprogressFill").style.width = (p * 100) + "%"; $("mstatus").textContent = m; });
+    $("mprogressFill").style.width = "100%";
+    const name = mfiles[0].name.replace(/\.pdf$/i, "") + " - merged.pdf";
+    mresult = { blob: new Blob([res.bytes], { type: "application/pdf" }), name };
+    $("mstatus").textContent = `${mfiles.length} files joined, ${res.pages} pages in total. Every page unchanged.`;
+    $("mresult").innerHTML = `
+      <p class="verdict">Merged PDF ready — ${fmt(mresult.blob.size)}</p>
+      <div class="actions" style="margin-top:0">
+        <button id="msave">Download merged PDF</button>
+        <button class="ghost" id="mtosplit">Split this file</button>
+      </div>`;
+    $("msave").addEventListener("click", () => saveBlob(mresult.blob, mresult.name));
+    $("mtosplit").addEventListener("click", () => {
+      setFile(new File([mresult.blob], mresult.name, { type: "application/pdf" }));
+      showTab("split"); $("go").focus();
+    });
+    $("msave").focus();
+  } catch (e) {
+    console.error(e);
+    $("mwork").classList.remove("show");
+    showError(e instanceof UserError ? e.message
+      : (e && /memory|allocation|Array buffer/i.test(String(e.message)))
+        ? "The browser ran out of memory. Close other tabs and try again, or merge fewer files at a time."
+        : "Merging failed: " + (e && e.message ? e.message : e) + ".");
+  } finally { mbusy = false; $("mgo").disabled = mfiles.length < 2; }
+});
+
+async function saveBlob(blob, name) {
+  const dl = await getDownloads();
+  if (dl) {
+    try { await dl.save({ filename: name, data: blob }); return true; }
+    catch (e) {
+      if (e && e.code === "declined") return false;
+      if (e && e.code === "rate_limited") { showError("A save prompt is already open. Finish that one first."); return false; }
+      if (e && e.code === "too_large") { showError("This file is too large to save in this app. Open the page in a desktop browser."); return false; }
+      showError("Saving isn't available in this view. Open the page in a desktop browser to download the file.");
+      return false;
+    }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 120000);
+  return true;
 }
 
 let downloadsP = null;
