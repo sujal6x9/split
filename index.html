@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PDF Splitter — split big PDFs into parts by size</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<style>
+:root {
+  --paper: #EEF1F4; --sheet: #FFFFFF; --ink: #16202B; --muted: #5B6775; --line: #CFD6DE;
+  --signal: #2B4BE0; --signal-soft: #DCE3FF; --on-signal: #FFFFFF; --good: #177A52; --warn: #9A5B00;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body: "Public Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #10151B; --sheet: #18202A; --ink: #E6EBF0; --muted: #95A1AE; --line: #2B3645;
+    --signal: #8199FF; --signal-soft: #232E5C; --on-signal: #0D1330; --good: #4CC38A; --warn: #E0A64A;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #10151B; --sheet: #18202A; --ink: #E6EBF0; --muted: #95A1AE; --line: #2B3645;
+  --signal: #8199FF; --signal-soft: #232E5C; --on-signal: #0D1330; --good: #4CC38A; --warn: #E0A64A;
+}
+*, *::before, *::after { box-sizing: inherit; }
+html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--body); font-size: 16px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+main { max-width: 760px; margin: 0 auto; padding: 56px 20px 72px; }
+h1 { font-family: var(--display); font-weight: 800; font-size: clamp(2.3rem, 7vw, 3.9rem); line-height: 0.98; letter-spacing: -0.035em; margin: 0 0 18px; }
+.lede { font-size: 1.08rem; color: var(--muted); max-width: 56ch; margin: 0 0 36px; }
+.drop { display: block; position: relative; background: var(--sheet); border: 2px dashed var(--line); border-radius: 14px; padding: 38px 24px; text-align: center; cursor: pointer; transition: border-color .15s, background .15s; }
+.drop:hover, .drop.over { border-color: var(--signal); background: color-mix(in srgb, var(--signal-soft) 45%, var(--sheet)); }
+.drop:focus-within { outline: 3px solid var(--signal); outline-offset: 3px; }
+.drop input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+.drop strong { font-family: var(--display); font-size: 1.3rem; font-weight: 700; display: block; }
+.drop span { color: var(--muted); font-size: 0.95rem; }
+.file-line { display: none; margin-top: 14px; font-weight: 600; word-break: break-all; }
+.file-line.show { display: block; }
+
+.limit { margin-top: 24px; background: var(--sheet); border: 1px solid var(--line); border-radius: 12px; padding: 20px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; }
+.limit label, .limit .unit { font-family: var(--display); font-size: 1.35rem; font-weight: 700; }
+.limit input { width: 120px; font: 800 2rem var(--display); letter-spacing: -0.02em; padding: 6px 12px; border: 2px solid var(--line); border-radius: 10px; background: var(--paper); color: var(--ink); }
+.limit input:focus-visible { outline: none; border-color: var(--signal); }
+.limit p { flex-basis: 100%; margin: 4px 0 0; color: var(--muted); font-size: 0.9rem; }
+
+button { font: 600 1.02rem var(--body); border: 0; border-radius: 10px; padding: 14px 26px; cursor: pointer; background: var(--signal); color: var(--on-signal); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); padding: 10px 18px; font-size: 0.95rem; }
+.actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 28px; }
+
+.work { margin-top: 36px; display: none; }
+.work.show { display: block; }
+.status { font-size: 0.95rem; color: var(--muted); min-height: 1.5em; }
+.progress { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; margin-top: 10px; }
+.progress div { height: 100%; width: 0; background: var(--signal); transition: width .25s; }
+.verdict { font-family: var(--display); font-weight: 700; font-size: 1.5rem; letter-spacing: -0.015em; margin: 26px 0 14px; color: var(--good); }
+
+/* Signature: the file laid out as a strip of parts, width = size */
+.strip { display: flex; gap: 3px; height: 38px; margin: 0 0 22px; }
+.strip div { background: var(--signal); border-radius: 4px; min-width: 6px; transition: opacity .2s; }
+.strip div.over { background: var(--warn); }
+.strip div.done { opacity: .35; }
+
+.parts { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.parts li { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; background: var(--sheet); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; }
+.parts b { font-weight: 600; display: block; }
+.parts small { color: var(--muted); font-size: 0.88rem; }
+.parts li.over { border-color: var(--warn); }
+.parts li.over small { color: var(--warn); }
+.parts li.saved button { color: var(--good); border-color: var(--good); }
+.error { display: none; margin-top: 20px; padding: 14px 16px; border-radius: 10px; border: 1px solid var(--warn); background: var(--sheet); }
+.error.show { display: block; }
+.facts { margin-top: 56px; padding-top: 28px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.93rem; }
+.facts h2 { font-family: var(--display); color: var(--ink); font-size: 1.05rem; margin: 0 0 8px; }
+.facts p { margin: 0 0 12px; max-width: 66ch; }
+@media (max-width: 520px) { main { padding-top: 36px; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Split a big PDF into&nbsp;parts that fit.</h1>
+  <p class="lede">Every slide is copied exactly as it is. Nothing is re-compressed, resized or recoloured. Pages stay in order, and each part stays under the size you choose. Everything runs in your browser.</p>
+
+  <label class="drop" id="drop">
+    <input type="file" id="file" accept="application/pdf,.pdf" aria-label="Choose a PDF file">
+    <strong>Drop a PDF here or click to choose</strong>
+    <span>Files of 200 MB and more work best in Chrome, Edge or Firefox on a computer</span>
+    <div class="file-line" id="fileLine"></div>
+  </label>
+
+  <div class="limit">
+    <label for="limit">Each part up to</label>
+    <input type="number" id="limit" min="1" step="any" value="20" inputmode="decimal">
+    <span class="unit">MB</span>
+    <p>Parts are kept slightly under this, so they fit limits on WhatsApp, email and upload sites.</p>
+  </div>
+
+  <div class="actions">
+    <button id="go" disabled>Split PDF</button>
+  </div>
+
+  <div class="work" id="work" aria-live="polite">
+    <div class="status" id="status"></div>
+    <div class="progress"><div id="progressFill"></div></div>
+    <div id="result"></div>
+  </div>
+
+  <div class="error" id="error" role="alert"></div>
+
+  <div class="facts">
+    <h2>Why splitting keeps quality perfect</h2>
+    <p>Each page is moved into a new file with its images, fonts and graphics byte-for-byte identical. If several slides share an image or font, each part gets its own copy, so every part opens on its own.</p>
+    <p>A single slide bigger than your limit can't be split further without changing it. It gets a part of its own, marked in orange.</p>
+  </div>
+</main>
+
+<script>
+// ============ ENGINE START ============
+class UserError extends Error {}
+const tick = () => new Promise(r => setTimeout(r, 0));
+
+async function loadSource(bytes) {
+  const { PDFDocument } = PDFLib;
+  let src;
+  try { src = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false, throwOnInvalidObject: false }); }
+  catch (e) { throw new UserError("This file couldn't be read as a PDF. It may be damaged or not a PDF at all."); }
+  if (src.isEncrypted) throw new UserError("This PDF is password-protected. Remove the protection first, then try again.");
+  return src;
+}
+
+// Links that jump to another page would make the copier drag that page (and the whole document) into every part.
+// Unhook those page references so each part only carries its own pages. Nothing visible changes.
+function unhookPageLinks(src) {
+  const { PDFName, PDFArray, PDFDict, PDFRef } = PDFLib;
+  const N = s => PDFName.of(s), ctx = src.context;
+  const isPageRef = v => v instanceof PDFRef && ctx.lookup(v) instanceof PDFDict && ctx.lookup(v).lookup(N("Type")) === N("Page");
+  const pointsAtPage = d => d instanceof PDFArray && d.size() > 0 && isPageRef(d.get(0));
+  for (const page of src.getPages()) {
+    const annots = page.node.lookup(N("Annots"));
+    if (!(annots instanceof PDFArray)) continue;
+    for (let i = 0; i < annots.size(); i++) {
+      const a = ctx.lookup(annots.get(i));
+      if (!(a instanceof PDFDict)) continue;
+      a.delete(N("P"));
+      if (pointsAtPage(ctx.lookup(a.get(N("Dest"))))) a.delete(N("Dest"));
+      const act = ctx.lookup(a.get(N("A")));
+      if (act instanceof PDFDict && pointsAtPage(ctx.lookup(act.get(N("D"))))) a.delete(N("A"));
+    }
+  }
+}
+
+// For each page: the set of objects it needs, and the size of each object
+function measurePages(src) {
+  const { PDFName, PDFArray, PDFDict, PDFRef, PDFStream, PDFRawStream } = PDFLib;
+  const N = s => PDFName.of(s), ctx = src.context;
+  const sizeCache = new Map();
+  const sizeOf = (ref) => {
+    const k = ref.toString();
+    if (sizeCache.has(k)) return sizeCache.get(k);
+    const o = ctx.lookup(ref);
+    let s = 30;
+    try {
+      if (o instanceof PDFRawStream) s += o.contents.length + o.dict.sizeInBytes();
+      else if (o && o.sizeInBytes) s += o.sizeInBytes();
+    } catch { s += 200; }
+    sizeCache.set(k, s);
+    return s;
+  };
+  return src.getPages().map(page => {
+    const refs = new Map(), stack = [];
+    const node = page.node;
+    for (const [k, v] of node.entries()) if (k !== N("Parent")) stack.push(v);
+    for (const k of ["Resources", "MediaBox", "CropBox", "Rotate"]) {
+      if (!node.has(N(k))) { const inh = node.getInheritableAttribute(N(k)); if (inh) stack.push(inh); }
+    }
+    let base = 300;
+    try { base += node.sizeInBytes(); } catch {}
+    while (stack.length) {
+      const o = stack.pop();
+      if (o instanceof PDFRef) {
+        const k = o.toString();
+        if (refs.has(k)) continue;
+        const v = ctx.lookup(o);
+        if (v instanceof PDFDict && (v.lookup(N("Type")) === N("Page") || v.lookup(N("Type")) === N("Pages"))) continue;
+        refs.set(k, sizeOf(o));
+        if (v) stack.push(v);
+      } else if (o instanceof PDFStream) stack.push(o.dict);
+      else if (o instanceof PDFDict) { for (const [k, v] of o.entries()) if (k !== N("Parent")) stack.push(v); }
+      else if (o instanceof PDFArray) { for (const v of o.asArray()) stack.push(v); }
+    }
+    return { base, refs };
+  });
+}
+
+// How many pages from `start` fit under `budget`, by estimate
+function estimateEnd(measures, start, budget) {
+  const used = new Set();
+  let size = 2000, i = start;
+  while (i < measures.length) {
+    let add = measures[i].base;
+    for (const [k, s] of measures[i].refs) if (!used.has(k)) add += s;
+    if (i > start && size + add > budget) break;
+    for (const k of measures[i].refs.keys()) used.add(k);
+    size += add; i++;
+  }
+  return i;
+}
+
+async function buildPart(src, start, end, title) {
+  const { PDFDocument } = PDFLib;
+  const out = await PDFDocument.create();
+  const idx = []; for (let i = start; i < end; i++) idx.push(i);
+  const pages = await out.copyPages(src, idx);
+  pages.forEach(p => out.addPage(p));
+  out.setTitle(title);
+  out.setProducer("PDF Splitter");
+  return await out.save({ useObjectStreams: true, addDefaultPage: false, updateFieldAppearances: false });
+}
+
+async function splitPdf(bytes, limitBytes, baseName, progress, onPart) {
+  progress(0.02, "Reading the PDF");
+  await tick();
+  const src = await loadSource(bytes);
+  const n = src.getPageCount();
+  if (!n) throw new UserError("This PDF has no pages.");
+  unhookPageLinks(src);
+  progress(0.06, "Measuring each slide");
+  await tick();
+  const measures = measurePages(src);
+  const budget = limitBytes * 0.985;
+  const parts = [];
+  let start = 0;
+  while (start < n) {
+    let end = estimateEnd(measures, start, budget);
+    let data;
+    for (let attempt = 0; attempt < 12; attempt++) {
+      progress(0.08 + 0.9 * start / n, `Building part ${parts.length + 1} (pages ${start + 1}–${end} of ${n})`);
+      await tick();
+      data = await buildPart(src, start, end, `${baseName} (part ${parts.length + 1})`);
+      if (data.length <= limitBytes || end - start === 1) break;
+      // Estimate was a little off: shrink proportionally and try again
+      const keep = Math.max(1, Math.min(end - start - 1, Math.floor((end - start) * budget / data.length)));
+      end = start + keep;
+    }
+    const part = { start, end, bytes: data, over: data.length > limitBytes };
+    parts.push(part);
+    onPart && onPart(part, parts.length);
+    start = end;
+  }
+  progress(1, "Done");
+  return { parts, pages: n };
+}
+// ============ ENGINE END ============
+
+const $ = id => document.getElementById(id);
+const fmt = b => b >= 1e9 ? (b / 1e9).toFixed(2) + " GB" : b >= 1e6 ? (b / 1e6).toFixed(1) + " MB" : (b / 1e3).toFixed(0) + " KB";
+let file = null, parts = [], busy = false;
+
+function setFile(f) {
+  if (!f) return;
+  if (!/\.pdf$/i.test(f.name) && f.type !== "application/pdf") { showError("That file isn't a PDF. Choose a file ending in .pdf."); return; }
+  file = f; parts = [];
+  $("fileLine").textContent = `${f.name} — ${fmt(f.size)}`;
+  $("fileLine").classList.add("show");
+  $("go").disabled = false;
+  $("work").classList.remove("show"); hideError();
+}
+$("file").addEventListener("change", e => setFile(e.target.files[0]));
+const drop = $("drop");
+["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", e => setFile(e.dataTransfer.files[0]));
+function showError(msg) { $("error").textContent = msg; $("error").classList.add("show"); }
+function hideError() { $("error").classList.remove("show"); }
+const baseName = () => file.name.replace(/\.pdf$/i, "");
+const partName = (p, i, total) => `${baseName()} - Part ${i} of ${total} (pages ${p.start + 1}-${p.end}).pdf`;
+
+$("go").addEventListener("click", async () => {
+  if (!file || busy) return;
+  if (typeof PDFLib === "undefined") { showError("The PDF engine didn't load. Check your internet connection and reload the page."); return; }
+  const mb = parseFloat($("limit").value);
+  if (!(mb > 0)) { showError("Enter a part size in MB, for example 20."); return; }
+  if (file.size <= mb * 1e6) { showError(`This file is already ${fmt(file.size)}, which is under ${mb} MB. No need to split it.`); return; }
+  busy = true; $("go").disabled = true; hideError();
+  $("result").innerHTML = ""; $("work").classList.add("show");
+  try {
+    $("status").textContent = "Loading file into memory";
+    const input = new Uint8Array(await file.arrayBuffer());
+    const res = await splitPdf(input, mb * 1e6, baseName(),
+      (p, m) => { $("progressFill").style.width = (p * 100) + "%"; $("status").textContent = m; });
+    parts = res.parts.map(p => ({ ...p, blob: new Blob([p.bytes], { type: "application/pdf" }), bytes: null }));
+    render(res.pages, mb);
+  } catch (e) {
+    console.error(e);
+    $("work").classList.remove("show");
+    showError(e instanceof UserError ? e.message
+      : (e && /memory|allocation|Array buffer/i.test(String(e.message)))
+        ? "The browser ran out of memory. Close other tabs and try again, or use Chrome on a computer."
+        : "Something in this PDF couldn't be processed: " + (e && e.message ? e.message : e) + ".");
+  } finally { busy = false; $("go").disabled = !file; }
+});
+
+function render(pageCount, mb) {
+  const total = parts.length;
+  const overs = parts.filter(p => p.over);
+  $("status").textContent = `${pageCount} pages split into ${total} parts. Every slide unchanged.`;
+  const strip = parts.map((p, i) => `<div id="seg${i}" class="${p.over ? "over" : ""}" style="flex:${p.blob.size}" title="Part ${i + 1}: ${fmt(p.blob.size)}"></div>`).join("");
+  const rows = parts.map((p, i) => `
+    <li id="row${i}" class="${p.over ? "over" : ""}">
+      <span><b>Part ${i + 1}: pages ${p.start + 1}–${p.end}</b>
+        <small>${fmt(p.blob.size)}${p.over ? ` — this single slide is larger than ${mb} MB on its own` : ""}</small></span>
+      <button class="ghost" data-i="${i}">Download</button>
+    </li>`).join("");
+  $("result").innerHTML = `
+    <p class="verdict">${total} parts ready</p>
+    <div class="strip" aria-hidden="true">${strip}</div>
+    <div class="actions" style="margin:0 0 16px"><button id="all">Download all ${total} parts</button></div>
+    <ul class="parts">${rows}</ul>
+    ${overs.length ? `<p class="status" style="margin-top:14px;color:var(--warn)">${overs.length === 1 ? "One slide is" : overs.length + " slides are"} bigger than ${mb} MB by ${overs.length === 1 ? "itself" : "themselves"}. They can't be split smaller without changing the slide.</p>` : ""}`;
+  $("result").querySelectorAll("button[data-i]").forEach(b => b.addEventListener("click", () => savePart(+b.dataset.i)));
+  $("all").addEventListener("click", async () => {
+    $("all").disabled = true;
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i].saved) continue;
+      const ok = await savePart(i);
+      if (ok === "stop") break;
+    }
+    $("all").disabled = false;
+  });
+}
+
+let downloadsP = null;
+function getDownloads() {
+  if (!downloadsP) downloadsP = (window.claude && window.claude.use) ? window.claude.use("downloads") : Promise.resolve(null);
+  return downloadsP;
+}
+getDownloads();
+
+async function savePart(i) {
+  const p = parts[i];
+  const name = partName(p, i + 1, parts.length);
+  const dl = await getDownloads();
+  if (dl) {
+    try { await dl.save({ filename: name, data: p.blob }); }
+    catch (e) {
+      if (e && e.code === "declined") return "stop";
+      if (e && e.code === "rate_limited") { showError("A save prompt is already open. Finish that one first."); return "stop"; }
+      showError("Saving isn't available in this view. Open the page in a desktop browser to download the parts.");
+      return "stop";
+    }
+  } else {
+    const url = URL.createObjectURL(p.blob);
+    const a = document.createElement("a"); a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    await new Promise(r => setTimeout(r, 400));
+  }
+  p.saved = true;
+  $("row" + i).classList.add("saved");
+  $("row" + i).querySelector("button").textContent = "Downloaded";
+  $("seg" + i).classList.add("done");
+  return "ok";
+}
+</script>
+</body>
+</html>
