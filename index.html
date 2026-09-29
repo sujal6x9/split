@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
 :root {
   --paper: #EEF1F4; --sheet: #FFFFFF; --ink: #16202B; --muted: #5B6775; --line: #CFD6DE;
@@ -322,19 +323,47 @@ function render(pageCount, mb) {
   $("result").innerHTML = `
     <p class="verdict">${total} parts ready</p>
     <div class="strip" aria-hidden="true">${strip}</div>
-    <div class="actions" style="margin:0 0 16px"><button id="all">Download all ${total} parts</button></div>
+    <div class="actions" style="margin:0 0 16px"><button id="all">Download all ${total} parts as ZIP</button></div>
     <ul class="parts">${rows}</ul>
     ${overs.length ? `<p class="status" style="margin-top:14px;color:var(--warn)">${overs.length === 1 ? "One slide is" : overs.length + " slides are"} bigger than ${mb} MB by ${overs.length === 1 ? "itself" : "themselves"}. They can't be split smaller without changing the slide.</p>` : ""}`;
   $("result").querySelectorAll("button[data-i]").forEach(b => b.addEventListener("click", () => savePart(+b.dataset.i)));
-  $("all").addEventListener("click", async () => {
-    $("all").disabled = true;
-    for (let i = 0; i < parts.length; i++) {
-      if (parts[i].saved) continue;
-      const ok = await savePart(i);
-      if (ok === "stop") break;
+  $("all").addEventListener("click", saveZip);
+}
+
+async function saveZip() {
+  const btn = $("all");
+  if (typeof JSZip === "undefined") { showError("The ZIP tool didn't load. Check your internet connection and reload, or download the parts one by one."); return; }
+  btn.disabled = true; hideError();
+  const label = btn.textContent;
+  try {
+    const zip = new JSZip();
+    parts.forEach((p, i) => zip.file(partName(p, i + 1, parts.length), p.blob, { binary: true }));
+    // PDFs are already compressed, so store them as-is: fast and nothing changes
+    const blob = await zip.generateAsync({ type: "blob", compression: "STORE", streamFiles: true },
+      m => { btn.textContent = `Preparing ZIP… ${Math.round(m.percent)}%`; });
+    btn.textContent = label;
+    const name = `${baseName()} - ${parts.length} parts.zip`;
+    const dl = await getDownloads();
+    if (dl) {
+      try { await dl.save({ filename: name, data: blob }); }
+      catch (e) {
+        if (e && e.code === "declined") return;
+        if (e && e.code === "rate_limited") { showError("A save prompt is already open. Finish that one first."); return; }
+        if (e && e.code === "too_large") { showError("The ZIP is too large to save in this app. Download the parts one by one, or open the page in a desktop browser."); return; }
+        showError("Saving isn't available in this view. Open the page in a desktop browser to download the ZIP.");
+        return;
+      }
+    } else {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 120000);
     }
-    $("all").disabled = false;
-  });
+    parts.forEach((p, i) => { p.saved = true; $("row" + i).classList.add("saved"); $("row" + i).querySelector("button").textContent = "Downloaded"; $("seg" + i).classList.add("done"); });
+  } catch (e) {
+    console.error(e);
+    showError("The ZIP couldn't be created, most likely because the browser ran out of memory. Download the parts one by one instead.");
+  } finally { btn.textContent = label; btn.disabled = false; }
 }
 
 let downloadsP = null;
