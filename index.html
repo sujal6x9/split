@@ -99,7 +99,7 @@ button.ghost { background: transparent; color: var(--ink); border: 1px solid var
 <body>
 <main>
   <h1>Split a big PDF into&nbsp;parts that fit.</h1>
-  <p class="lede">Pages stay in order, and each part stays under the size you choose. Pictures are copied untouched, and text can be turned into shapes so Canva cannot change it. Everything runs in your browser.</p>
+  <p class="lede">Pages stay in order, and each part stays under the size you choose. Canva-safe mode locks every page as one picture so Canva cannot fade, move or re-type the content. Everything runs in your browser.</p>
 
   <label class="drop" id="drop">
     <input type="file" id="file" accept="application/pdf,.pdf" aria-label="Choose a PDF file">
@@ -118,13 +118,20 @@ button.ghost { background: transparent; color: var(--ink); border: 1px solid var
   <div class="smooth pick">
     <div><label for="mode">Pages</label>
       <select id="mode">
-        <option value="outline" selected>Exact copy, text as shapes: Canva cannot re-type the text</option>
+        <option value="flat-ultra" selected>Canva safe, ultra quality: closest to original</option>
+        <option value="flat-high">Canva safe, best quality: lock each page as one lossless picture</option>
+        <option value="outline">Exact copy, text as shapes: Canva cannot re-type the text</option>
         <option value="copy">Exact copy: text stays real text</option>
         <option value="flat">Locked pictures: each page becomes one picture</option>
-        <option value="flat-high">Locked pictures, high detail: sharper zoom, heavier files</option>
       </select>
       <span id="modeHelp"></span></div>
   </div>
+
+  <label class="smooth" id="linkRow">
+    <input type="checkbox" id="dropLinks" checked>
+    <div>Remove clickable links
+      <span>Web and phone links, usually in the footer, stop being clickable. Shapes that sit under a link may be what Canva fades, so this is on for Canva. Untick it if you need the links to keep working in the PDF.</span></div>
+  </label>
 
   <label class="smooth" id="markerRow">
     <input type="checkbox" id="marker" checked>
@@ -212,6 +219,7 @@ function unhookPageLinks(src) {
 // viewer preferences and language. Copying pages alone leaves these behind, which made hidden layers
 // show up in the parts and dropped the colour profile. Every part now carries them.
 const DOC_KEYS = ["OCProperties", "OutputIntents", "ViewerPreferences", "Lang"];
+const PAGE_KEYS = ["Resources", "MediaBox", "CropBox", "BleedBox", "TrimBox", "ArtBox", "Rotate", "UserUnit"];
 
 // For each page: the set of objects it needs, and the size of each object.
 // Also the size of the document settings that go into every part.
@@ -251,7 +259,7 @@ function measurePages(src) {
   const pages = src.getPages().map(page => {
     const stack = [], node = page.node;
     for (const [k, v] of node.entries()) if (k !== N("Parent")) stack.push(v);
-    for (const k of ["Resources", "MediaBox", "CropBox", "Rotate"]) {
+    for (const k of PAGE_KEYS) {
       if (!node.has(N(k))) { const inh = node.getInheritableAttribute(N(k)); if (inh) stack.push(inh); }
     }
     let base = 300;
@@ -616,6 +624,7 @@ function textToShapes(src, resources, ctx, fonts, report) {
   const { PDFName, PDFDict } = PDFLib;
   const n = src.length, out = [];
   const fontDict = resources instanceof PDFDict ? resources.lookup(PDFName.of("Font")) : null;
+  const stateDict = resources instanceof PDFDict ? resources.lookup(PDFName.of("ExtGState")) : null;
   const isWs = c => c === 0 || c === 9 || c === 10 || c === 12 || c === 13 || c === 32;
   const isDelim = c => c === 40 || c === 41 || c === 60 || c === 62 || c === 91 || c === 93 || c === 123 || c === 125 || c === 47 || c === 37;
   const mul = (m, c) => [m[0] * c[0] + m[1] * c[2], m[0] * c[1] + m[1] * c[3], m[2] * c[0] + m[3] * c[2], m[2] * c[1] + m[3] * c[3], m[4] * c[0] + m[5] * c[2] + c[4], m[4] * c[1] + m[5] * c[3] + c[5]];
@@ -663,7 +672,11 @@ function textToShapes(src, resources, ctx, fonts, report) {
     return { t: "op", v: w, s, e: i };
   };
 
-  let gs = { fontName: null, font: undefined, size: 0, Tc: 0, Tw: 0, Th: 1, TL: 0, Ts: 0, Tr: 0 };
+  let gs = { fontName: null, font: undefined, size: 0, Tc: 0, Tw: 0, Th: 1, TL: 0, Ts: 0, Tr: 0, ca: 1, CA: 1 };
+  // Outline being built by the page's own drawing instructions, held back until we see how it is painted
+  let held = [], heldClip = false;
+  const release = () => { if (held.length) { out.push(...held); held = []; heldClip = false; } };
+  const BUILD = new Set(["m", "l", "c", "v", "y", "h", "re"]), PAINT = new Set(["f", "F", "f*", "B", "B*", "b", "b*", "S", "s", "n"]);
   let ctm = [1, 0, 0, 1, 0, 0], Tm = [1, 0, 0, 1, 0, 0], Tlm = Tm;
   const stack = [];
   let path = [], pathMode = 0, digits = 3;
@@ -672,7 +685,7 @@ function textToShapes(src, resources, ctx, fonts, report) {
     if (path.length) { out.push(path.join(" ") + (pathMode === 1 ? " S\n" : pathMode === 2 ? " B\n" : " f\n")); report.shapes++; }
     path = [];
   };
-  const pass = (ops, tok) => { flush(); out.push(src.subarray(ops.length ? ops[0].s : tok.s, tok.e), "\n"); };
+  const pass = (ops, tok) => { flush(); release(); out.push(src.subarray(ops.length ? ops[0].s : tok.s, tok.e), "\n"); };
   const need = (ops, k) => { if (ops.length < k) throw new LeaveAsIs(); for (let j = ops.length - k; j < ops.length; j++) if (ops[j].t !== "num") throw new LeaveAsIs(); return ops.slice(ops.length - k).map(o => o.v); };
   const font = () => {
     if (gs.font !== undefined) return gs.font;
@@ -756,11 +769,39 @@ function textToShapes(src, resources, ctx, fonts, report) {
         out.push(src.subarray(tok.s, j + 2), "\n"); i = j + 2;
         break;
       }
-      default: pass(ops, tok);
+      case "gs": {
+        // Remember when fills or strokes become fully transparent.
+        const nm = ops[ops.length - 1], d = nm && nm.t === "name" && stateDict instanceof PDFDict ? stateDict.lookup(PDFName.of(nm.v)) : null;
+        const ca = d instanceof PDFDict ? d.lookup(PDFName.of("ca")) : null;
+        const CA = d instanceof PDFDict ? d.lookup(PDFName.of("CA")) : null;
+        if (ca instanceof PDFLib.PDFNumber) gs.ca = ca.asNumber();
+        if (CA instanceof PDFLib.PDFNumber) gs.CA = CA.asNumber();
+        pass(ops, tok);
+        break;
+      }
+      default: {
+        const chunk = [src.subarray(ops.length ? ops[0].s : tok.s, tok.e), "\n"];
+        if (BUILD.has(tok.v) || tok.v === "W" || tok.v === "W*") {
+          flush();
+          if (tok.v === "W" || tok.v === "W*") heldClip = true;
+          held.push(...chunk);
+        } else if (PAINT.has(tok.v)) {
+          flush();
+          const fill = tok.v === "f" || tok.v === "F" || tok.v === "f*" || tok.v === "B" || tok.v === "B*" || tok.v === "b" || tok.v === "b*";
+          const stroke = tok.v === "S" || tok.v === "s" || tok.v === "B" || tok.v === "B*" || tok.v === "b" || tok.v === "b*";
+          if ((fill || stroke) && !(fill && gs.ca > 0.003) && !(stroke && gs.CA > 0.003)) {
+            // Fully transparent paths draw nothing. Editors such as Canva can still import them and blend their
+            // transparency into neighbouring objects, which fades footer/link content, so they are left out.
+            if (heldClip) out.push(...held, "n\n");
+            held = []; heldClip = false;
+            report.hidden++;
+          } else { release(); out.push(...chunk); }
+        } else pass(ops, tok);
+      }
     }
     ops = [];
   }
-  flush();
+  flush(); release();
   if (ops.length) throw new LeaveAsIs();
   let len = 0;
   const parts = out.map(p => { if (typeof p === "string") { const b = new Uint8Array(p.length); for (let k = 0; k < p.length; k++) b[k] = p.charCodeAt(k); p = b; } len += p.length; return p; });
@@ -774,7 +815,7 @@ function outlinePart(out, report) {
   const { PDFName, PDFArray, PDFDict, PDFRef, PDFRawStream, decodePDFRawStream } = PDFLib;
   const N = s => PDFName.of(s), ctx = out.context;
   const fonts = new Map(), done = new Set(), fontUse = new Map();
-  const fresh = () => ({ shapes: 0, drawn: 0, kept: 0, keptFonts: new Set() });
+  const fresh = () => ({ shapes: 0, drawn: 0, kept: 0, hidden: 0, keptFonts: new Set() });
   const note = (resources, r, ok) => {
     const fd = resources instanceof PDFDict ? resources.lookup(N("Font")) : null;
     if (!(fd instanceof PDFDict)) return;
@@ -795,13 +836,13 @@ function outlinePart(out, report) {
       const r = fresh();
       try {
         const bytes = textToShapes(decodePDFRawStream(x).decode(), res, ctx, fonts, r);
-        if (r.drawn) {
+        if (r.drawn || r.hidden) {
           const d = x.dict; d.delete(N("DecodeParms"));
           const packed = ctx.flateStream(bytes);
           d.set(N("Filter"), N("FlateDecode"));
           ctx.assign(v, PDFRawStream.of(d, packed.contents));
         }
-        note(res, r, true); report.shapes += r.shapes; report.kept += r.kept;
+        note(res, r, true); report.shapes += r.shapes; report.kept += r.kept; report.hidden += r.hidden;
       } catch (e) { if (!(e instanceof LeaveAsIs)) throw e; note(res, r, false); allOk = false; }
       if (!forms(res, res, depth + 1)) allOk = false;
     }
@@ -820,13 +861,13 @@ function outlinePart(out, report) {
       for (const b of chunks) { all.set(b, o); o += b.length; all[o++] = 10; }
       const bytes = textToShapes(all, resources, ctx, fonts, r);
       hadText = r.drawn + r.kept > 0;
-      if (r.drawn) node.set(N("Contents"), ctx.register(ctx.flateStream(bytes)));
+      if (r.drawn || r.hidden) node.set(N("Contents"), ctx.register(ctx.flateStream(bytes)));
       note(resources, r, true);
     } catch (e) { if (!(e instanceof LeaveAsIs)) throw e; ok = false; note(resources, r, false); }
     if (!forms(resources, resources, 0)) ok = false;
     report.pages++;
     if (!ok || r.kept) report.pagesWithText++;
-    report.shapes += r.shapes; report.kept += r.kept;
+    report.shapes += r.shapes; report.kept += r.kept; report.hidden += r.hidden;
   }
   // Fonts that no page instruction uses any more are taken off the pages, then everything unreachable is dropped from the file
   for (const [fd, u] of fontUse) if (u.ok) for (const [k] of fd.entries()) if (!u.keep.has(k.decodeText ? k.decodeText() : k.asString().slice(1))) fd.delete(k);
@@ -866,6 +907,22 @@ function addTextMarker(out) {
   }
 }
 
+// Takes the clickable link areas off the pages (web and phone links, usually on footers). Other notes and marks stay.
+function removeLinks(out) {
+  const { PDFName, PDFArray, PDFDict } = PDFLib;
+  const N = s => PDFName.of(s), ctx = out.context;
+  let removed = 0;
+  for (const page of out.getPages()) {
+    const node = page.node, raw = node.get(N("Annots")), list = raw ? ctx.lookup(raw) : null;
+    if (!(list instanceof PDFArray)) continue;
+    const keep = list.asArray().filter(a => { const d = ctx.lookup(a); return !(d instanceof PDFDict && d.lookup(N("Subtype")) === N("Link")); });
+    removed += list.size() - keep.length;
+    if (keep.length === list.size()) continue;
+    if (keep.length) node.set(N("Annots"), ctx.obj(keep)); else node.delete(N("Annots"));
+  }
+  return removed;
+}
+
 async function buildPart(src, measures, start, end, title, opt) {
   const { PDFDocument, PDFObjectCopier, PDFPage, PDFName, PDFNumber, PDFStream, PDFRawStream, PDFBool } = PDFLib;
   const N = s => PDFName.of(s);
@@ -875,7 +932,15 @@ async function buildPart(src, measures, start, end, title, opt) {
   const copier = PDFObjectCopier.for(src.context, out.context);
   const srcPages = src.getPages();
   for (let i = start; i < end; i++) {
-    const node = copier.copy(srcPages[i].node);
+    const sourceNode = srcPages[i].node;
+    const node = copier.copy(sourceNode);
+    for (const k of PAGE_KEYS) {
+      const name = N(k);
+      if (!node.has(name)) {
+        const inherited = sourceNode.getInheritableAttribute(name);
+        if (inherited) node.set(name, copier.copy(inherited));
+      }
+    }
     out.addPage(PDFPage.of(node, out.context.register(node), out));
   }
   for (const k of DOC_KEYS) {
@@ -920,8 +985,12 @@ async function buildPart(src, measures, start, end, title, opt) {
   }
   out.setTitle(title);
   out.setProducer("PDF Splitter");
-  const text = { pages: 0, pagesWithText: 0, shapes: 0, kept: 0 };
-  if (opt.outline) { outlinePart(out, text); if (opt.marker) addTextMarker(out); }
+  const text = { pages: 0, pagesWithText: 0, shapes: 0, kept: 0, hidden: 0, links: 0 };
+  if (opt.outline) {
+    if (opt.dropLinks) text.links = removeLinks(out);
+    outlinePart(out, text);
+    if (opt.marker) addTextMarker(out);
+  }
   const data = await out.save({ useObjectStreams: true, addDefaultPage: false, updateFieldAppearances: false });
   return { data, enhanced, text };
 }
@@ -1025,7 +1094,7 @@ async function checkPart(src, measures, start, end, data, skip) {
   return { total, same };
 }
 
-async function splitPdf(bytes, limitBytes, baseName, progress, onPart, smooth = true, enhance = false, outline = false, marker = true) {
+async function splitPdf(bytes, limitBytes, baseName, progress, onPart, smooth = true, enhance = false, outline = false, marker = true, dropLinks = true) {
   progress(0.02, "Reading the PDF");
   await tick();
   const src = await loadSource(bytes);
@@ -1038,7 +1107,7 @@ async function splitPdf(bytes, limitBytes, baseName, progress, onPart, smooth = 
   let quality = null;
   try { quality = pictureQuality(src); } catch {}
   const checked = { total: 0, same: 0, failed: false, sharpened: 0 };
-  const textDone = { pages: 0, pagesWithText: 0, shapes: 0 };
+  const textDone = { pages: 0, pagesWithText: 0, shapes: 0, hidden: 0, links: 0 };
   // Which pictures to enlarge and sharpen, and by how much
   let E = null;
   const level = ENHANCE_LEVELS[enhance === true ? "light" : enhance];
@@ -1071,7 +1140,7 @@ async function splitPdf(bytes, limitBytes, baseName, progress, onPart, smooth = 
       progress(0.08 + 0.9 * start / n, `Building part ${parts.length + 1} (pages ${start + 1}–${end} of ${n})`);
       await tick();
       const partNo = parts.length + 1, at = 0.08 + 0.9 * start / n;
-      last = await buildPart(src, measures, start, end, `${baseName} (part ${partNo})`, { smooth, enhance: E, outline, marker, note: m => progress(at, m) });
+      last = await buildPart(src, measures, start, end, `${baseName} (part ${partNo})`, { smooth, enhance: E, outline, marker, dropLinks, note: m => progress(at, m) });
       last.end = end;
       if (last.data.length <= limitBytes || end - start === 1) {
         best = last;
@@ -1089,7 +1158,7 @@ async function splitPdf(bytes, limitBytes, baseName, progress, onPart, smooth = 
       }
     }
     const { data, enhanced, text } = best || last;
-    textDone.pages += text.pages; textDone.pagesWithText += text.pagesWithText; textDone.shapes += text.shapes;
+    textDone.pages += text.pages; textDone.pagesWithText += text.pagesWithText; textDone.shapes += text.shapes; textDone.hidden += text.hidden; textDone.links += text.links;
     end = (best || last).end;
     progress(0.08 + 0.9 * end / n, `Checking part ${parts.length + 1} against your file`);
     await tick();
@@ -1144,12 +1213,17 @@ async function flattenPdf(bytes, limitBytes, baseName, progress, opt) {
   const writePart = async (end) => {
     const out = await PDFDocument.create();
     for (const p of waiting) {
-      const dict = { Type: "XObject", Subtype: "Image", Width: p.W, Height: p.H, BitsPerComponent: 8, ColorSpace: "DeviceRGB", Filter: "DCTDecode" };
-      if (opt.smooth) dict.Interpolate = true;
-      const ref = out.context.register(out.context.stream(p.jpg, dict));
       const page = out.addPage([p.w, p.h]);
-      const name = page.node.newXObject("Page", ref);
-      page.pushOperators(pushGraphicsState(), concatTransformationMatrix(p.w, 0, 0, p.h, 0, 0), drawObject(name), popGraphicsState());
+      if (p.kind === "png") {
+        const img = await out.embedPng(p.bytes);
+        page.drawImage(img, { x: 0, y: 0, width: p.w, height: p.h });
+      } else {
+        const dict = { Type: "XObject", Subtype: "Image", Width: p.W, Height: p.H, BitsPerComponent: 8, ColorSpace: "DeviceRGB", Filter: "DCTDecode" };
+        if (opt.smooth) dict.Interpolate = true;
+        const ref = out.context.register(out.context.stream(p.bytes, dict));
+        const name = page.node.newXObject("Page", ref);
+        page.pushOperators(pushGraphicsState(), concatTransformationMatrix(p.w, 0, 0, p.h, 0, 0), drawObject(name), popGraphicsState());
+      }
     }
     if (opt.marker) addTextMarker(out);
     out.setTitle(`${baseName} (part ${parts.length + 1})`);
@@ -1164,20 +1238,21 @@ async function flattenPdf(bytes, limitBytes, baseName, progress, opt) {
     await tick();
     const page = await doc.getPage(i);
     const base = page.getViewport({ scale: 1 });
-    const scale = Math.min(opt.longSide / Math.max(base.width, base.height), Math.sqrt(16e6 / (base.width * base.height)));
+    const scale = Math.min(opt.longSide / Math.max(base.width, base.height), Math.sqrt((opt.maxPixels || 16e6) / (base.width * base.height)));
     const view = page.getViewport({ scale });
     canvas.width = Math.max(1, Math.round(view.width)); canvas.height = Math.max(1, Math.round(view.height));
     const g = canvas.getContext("2d", { alpha: false });
     g.fillStyle = "#ffffff"; g.fillRect(0, 0, canvas.width, canvas.height);
     await page.render({ canvasContext: g, viewport: view, background: "#ffffff" }).promise;
-    const blob = await new Promise(res => canvas.toBlob(res, "image/jpeg", 0.92));
+    const kind = opt.lossless ? "png" : "jpg";
+    const blob = await new Promise(res => canvas.toBlob(res, opt.lossless ? "image/png" : "image/jpeg", opt.quality || 0.97));
     if (!blob) throw new UserError(`Page ${i} is too large to draw in this browser. Try the standard setting, or use Chrome on a computer.`);
-    const jpg = new Uint8Array(await blob.arrayBuffer());
+    const img = new Uint8Array(await blob.arrayBuffer());
     page.cleanup();
     const dpi = scale * 72; dpiLow = Math.min(dpiLow, dpi); dpiHigh = Math.max(dpiHigh, dpi);
-    if (waiting.length && size + jpg.length + 700 > budget) await writePart(i - 1);
-    waiting.push({ jpg, W: canvas.width, H: canvas.height, w: base.width, h: base.height });
-    size += jpg.length + 700;
+    if (waiting.length && size + img.length + 1200 > budget) await writePart(i - 1);
+    waiting.push({ bytes: img, kind, W: canvas.width, H: canvas.height, w: base.width, h: base.height });
+    size += img.length + 1200;
   }
   await writePart(n);
   canvas.width = canvas.height = 0;
@@ -1189,6 +1264,11 @@ async function flattenPdf(bytes, limitBytes, baseName, progress, opt) {
 
 const $ = id => document.getElementById(id);
 const fmt = b => b >= 1e9 ? (b / 1e9).toFixed(2) + " GB" : b >= 1e6 ? (b / 1e6).toFixed(1) + " MB" : (b / 1e3).toFixed(0) + " KB";
+const FLAT_PROFILES = {
+  flat: { longSide: 2400, maxPixels: 16e6, lossless: false, quality: 0.96 },
+  "flat-high": { longSide: 4800, maxPixels: 24e6, lossless: true, quality: 0.96 },
+  "flat-ultra": { longSide: 7600, maxPixels: 58e6, lossless: true, quality: 0.96 },
+};
 let file = null, parts = [], busy = false;
 
 function setFile(f) {
@@ -1224,8 +1304,12 @@ $("go").addEventListener("click", async () => {
     const onProgress = (p, m) => { $("progressFill").style.width = (p * 100) + "%"; $("status").textContent = m; };
     const mode = $("mode").value;
     const res = mode === "copy" || mode === "outline"
-      ? await splitPdf(input, mb * 1e6, baseName(), onProgress, null, $("smooth").checked, $("enhance").value, mode === "outline", $("marker").checked)
-      : await flattenPdf(input, mb * 1e6, baseName(), onProgress, { longSide: mode === "flat-high" ? 3300 : 2200, smooth: $("smooth").checked, marker: $("marker").checked });
+      ? await splitPdf(input, mb * 1e6, baseName(), onProgress, null, $("smooth").checked, $("enhance").value, mode === "outline", $("marker").checked, $("dropLinks").checked)
+      : await flattenPdf(input, mb * 1e6, baseName(), onProgress, {
+        ...FLAT_PROFILES[mode],
+        smooth: $("smooth").checked,
+        marker: $("marker").checked
+      });
     parts = res.parts.map(p => ({ ...p, blob: new Blob([p.bytes], { type: "application/pdf" }), bytes: null }));
     render(res.pages, mb, res);
   } catch (e) {
@@ -1269,6 +1353,8 @@ function textNote(t) {
   const done = t.pages - t.pagesWithText;
   let s = `<b>Text as shapes:</b> on ${done} of ${t.pages} pages, all text was redrawn as its exact letter shapes. It looks the same and stays sharp at any zoom, and Canva has no text there to re-type. It can no longer be edited, selected or searched.`;
   if (t.pagesWithText) s += ` <b>${t.pagesWithText} ${t.pagesWithText === 1 ? "page still contains" : "pages still contain"} ordinary text</b>, because the fonts there are of a kind this tool cannot convert. Canva may still change the text on those pages.`;
+  if (t.hidden) s += ` ${t.hidden} invisible leftover shapes were also removed; they draw nothing.`;
+  if (t.links) s += ` ${t.links} clickable ${t.links === 1 ? "link was" : "links were"} removed.`;
   return s + "<br>";
 }
 
@@ -1281,8 +1367,9 @@ function flatNote(f) {
 
 const MODE_HELP = {
   outline: "Pages are copied as they are, with every picture untouched. Only the text is redrawn as its exact letter shapes, taken from the fonts inside your PDF. It looks the same and stays sharp at any zoom, but Canva has no text left to re-type or move. The text can no longer be edited, selected or searched.",
-  flat: "Each page is drawn exactly as a PDF viewer shows it and saved as one picture. Canva rebuilds a normal PDF page when importing, which can shift or change text; a picture cannot be changed. Text is no longer editable or searchable.",
-  "flat-high": "The same, drawn with about twice as many pixels. Text stays sharper when zoomed, but parts are bigger and heavier to scroll.",
+  flat: "Each page is drawn exactly as a PDF viewer shows it and saved as one picture. Canva rebuilds normal PDF objects when importing, which can fade, shift or change them; a picture cannot be rebuilt that way. Text is no longer editable or searchable.",
+  "flat-high": "Safest for Canva and best quality. Each page is drawn exactly as a PDF viewer shows it and saved as one lossless high-detail picture, so Canva cannot fade, move, reflow or re-type the contents. Files are bigger, and text is no longer editable or searchable.",
+  "flat-ultra": "Closest visual match for Canva. Each page is rendered much larger and saved losslessly, so small footer logos and text stay sharper. Files are much bigger, and text is no longer editable or searchable.",
   copy: "Pages are copied as they are in your PDF, with real text. Best for reading and searching. Canva may shift or change text when importing such pages.",
 };
 function syncMode() {
@@ -1290,6 +1377,7 @@ function syncMode() {
   $("modeHelp").textContent = MODE_HELP[m];
   $("enhanceRow").style.display = m === "copy" || m === "outline" ? "" : "none";
   $("markerRow").style.display = m === "copy" ? "none" : "";
+  $("linkRow").style.display = m === "outline" ? "" : "none";
 }
 $("mode").addEventListener("change", syncMode);
 syncMode();
