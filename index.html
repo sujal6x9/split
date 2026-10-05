@@ -3,13 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>PDF Toolkit — split and merge PDFs without changing them</title>
+<title>PDF Splitter — split big PDFs into parts by size</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
 <style>
 :root {
   --paper: #EEF1F4; --sheet: #FFFFFF; --ink: #16202B; --muted: #5B6775; --line: #CFD6DE;
@@ -51,6 +49,14 @@ h1 { font-family: var(--display); font-weight: 800; font-size: clamp(2.3rem, 7vw
 .limit input:focus-visible { outline: none; border-color: var(--signal); }
 .limit p { flex-basis: 100%; margin: 4px 0 0; color: var(--muted); font-size: 0.9rem; }
 
+.smooth { display: flex; gap: 12px; align-items: flex-start; margin-top: 16px; padding: 0 4px; font-weight: 600; cursor: pointer; }
+.smooth input { width: 20px; height: 20px; margin: 3px 0 0; flex: none; accent-color: var(--signal); }
+.smooth span { display: block; font-weight: 400; color: var(--muted); font-size: 0.9rem; }
+.smooth.pick { cursor: default; }
+.smooth.pick label { margin-right: 10px; }
+.smooth select { font: 500 0.95rem var(--body); padding: 6px 10px; margin: 2px 0 6px; border: 2px solid var(--line); border-radius: 8px; background: var(--sheet); color: var(--ink); max-width: 100%; }
+.smooth select:focus-visible { outline: none; border-color: var(--signal); }
+
 button { font: 600 1.02rem var(--body); border: 0; border-radius: 10px; padding: 14px 26px; cursor: pointer; background: var(--signal); color: var(--on-signal); }
 button:disabled { opacity: .45; cursor: not-allowed; }
 button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
@@ -70,6 +76,10 @@ button.ghost { background: transparent; color: var(--ink); border: 1px solid var
 .strip div.over { background: var(--warn); }
 .strip div.done { opacity: .35; }
 
+.quality { background: var(--sheet); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 0 0 20px; font-size: 0.95rem; max-width: 70ch; }
+.quality:empty { display: none; }
+.quality b { font-weight: 600; }
+
 .parts { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .parts li { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; background: var(--sheet); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; }
 .parts b { font-weight: 600; display: block; }
@@ -77,29 +87,6 @@ button.ghost { background: transparent; color: var(--ink); border: 1px solid var
 .parts li.over { border-color: var(--warn); }
 .parts li.over small { color: var(--warn); }
 .parts li.saved button { color: var(--good); border-color: var(--good); }
-.modes { display: grid; gap: 8px; margin-top: 24px; }
-.mode { display: grid; grid-template-columns: 22px 1fr; gap: 12px; align-items: start; background: var(--sheet); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; cursor: pointer; }
-.mode:has(input:checked) { border-color: var(--signal); box-shadow: inset 0 0 0 1px var(--signal); }
-.mode:has(input:focus-visible) { outline: 3px solid var(--signal); outline-offset: 2px; }
-.mode input { margin: 4px 0 0; accent-color: var(--signal); width: 18px; height: 18px; }
-.mode b { font-weight: 600; display: block; }
-.mode small { color: var(--muted); font-size: 0.88rem; display: block; margin-top: 2px; }
-.sub { margin: 4px 0 0 34px; display: none; gap: 8px; }
-.sub.show { display: grid; }
-.sub .mode { padding: 10px 14px; }
-.tabs { display: inline-flex; background: var(--sheet); border: 1px solid var(--line); border-radius: 12px; padding: 4px; gap: 4px; margin: 0 0 28px; }
-.tabs button { background: transparent; color: var(--muted); padding: 10px 22px; border-radius: 9px; font-size: 1rem; }
-.tabs button[aria-selected="true"] { background: var(--signal); color: var(--on-signal); }
-.mlist { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 8px; counter-reset: m; }
-.mlist li { counter-increment: m; display: grid; grid-template-columns: 2.2em 1fr auto; gap: 10px; align-items: center; background: var(--sheet); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
-.mlist li::before { content: counter(m); font-family: var(--display); font-weight: 800; font-size: 1.2rem; color: var(--signal); text-align: center; }
-.mlist .nm { min-width: 0; }
-.mlist .nm b { font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mlist .nm small { color: var(--muted); font-size: 0.88rem; }
-.mlist .ctl { display: flex; gap: 4px; }
-.mlist .ctl button { background: transparent; color: var(--ink); border: 1px solid var(--line); padding: 6px 10px; font-size: 0.9rem; border-radius: 8px; }
-.mlist .ctl button:disabled { opacity: .3; }
-.mtotal { color: var(--muted); font-size: 0.93rem; margin: 12px 0 0; min-height: 1.4em; }
 .error { display: none; margin-top: 20px; padding: 14px 16px; border-radius: 10px; border: 1px solid var(--warn); background: var(--sheet); }
 .error.show { display: block; }
 .facts { margin-top: 56px; padding-top: 28px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.93rem; }
@@ -111,15 +98,8 @@ button.ghost { background: transparent; color: var(--ink); border: 1px solid var
 </head>
 <body>
 <main>
-  <h1 id="headline">Split a big PDF into&nbsp;parts that fit.</h1>
-  <p class="lede" id="lede">Pages stay in order and each part stays under the size you choose. Pick “For Canva” if you’ll import the parts into Canva — every slide then comes back looking exactly as it did. Everything runs in your browser.</p>
-
-  <div class="tabs" role="tablist" aria-label="Tool">
-    <button role="tab" id="tab-split" aria-selected="true" aria-controls="panel-split">Split</button>
-    <button role="tab" id="tab-merge" aria-selected="false" aria-controls="panel-merge">Merge</button>
-  </div>
-
-  <div id="panel-split" role="tabpanel" aria-labelledby="tab-split">
+  <h1>Split a big PDF into&nbsp;parts that fit.</h1>
+  <p class="lede">Pages stay in order, and each part stays under the size you choose. Pictures are copied untouched, and text can be turned into shapes so Canva cannot change it. Everything runs in your browser.</p>
 
   <label class="drop" id="drop">
     <input type="file" id="file" accept="application/pdf,.pdf" aria-label="Choose a PDF file">
@@ -128,34 +108,45 @@ button.ghost { background: transparent; color: var(--ink); border: 1px solid var
     <div class="file-line" id="fileLine"></div>
   </label>
 
-  <div class="modes" role="radiogroup" aria-label="Output type">
-    <label class="mode">
-      <input type="radio" name="mode" value="canva" checked>
-      <span><b>For Canva: each slide as a picture</b>
-        <small>Canva imports every slide exactly as it looks, Hindi text included. Text becomes part of the picture and can't be edited.</small></span>
-    </label>
-    <div class="sub show" id="qualityBox">
-      <label class="mode">
-        <input type="radio" name="quality" value="jpeg" checked>
-        <span><b>Looks identical</b><small>4K resolution, JPEG quality 95. No visible difference, sensible file sizes.</small></span>
-      </label>
-      <label class="mode">
-        <input type="radio" name="quality" value="lossless">
-        <span><b>Pixel-perfect</b><small>4K resolution, lossless. Every pixel exact, but files are several times bigger, so you get more parts.</small></span>
-      </label>
-    </div>
-    <label class="mode">
-      <input type="radio" name="mode" value="original">
-      <span><b>Original PDF</b>
-        <small>Pages copied byte-for-byte, text stays selectable. Best for viewing, printing and sharing, but Canva's import may garble Hindi text.</small></span>
-    </label>
-  </div>
-
   <div class="limit">
     <label for="limit">Each part up to</label>
     <input type="number" id="limit" min="1" step="any" value="20" inputmode="decimal">
     <span class="unit">MB</span>
     <p>Parts are kept slightly under this, so they fit limits on WhatsApp, email and upload sites.</p>
+  </div>
+
+  <div class="smooth pick">
+    <div><label for="mode">Pages</label>
+      <select id="mode">
+        <option value="outline" selected>Exact copy, text as shapes: Canva cannot re-type the text</option>
+        <option value="copy">Exact copy: text stays real text</option>
+        <option value="flat">Locked pictures: each page becomes one picture</option>
+        <option value="flat-high">Locked pictures, high detail: sharper zoom, heavier files</option>
+      </select>
+      <span id="modeHelp"></span></div>
+  </div>
+
+  <label class="smooth" id="markerRow">
+    <input type="checkbox" id="marker" checked>
+    <div>Keep Chrome's viewer smooth
+      <span>Chrome runs text recognition on every picture of a page that has no real text, which makes scrolling stutter. This adds one invisible dot of text to each page so Chrome skips that. In Canva it may appear as a tiny, empty text box in the bottom-left corner of a page.</span></div>
+  </label>
+
+  <label class="smooth">
+    <input type="checkbox" id="smooth">
+    <div>Smooth pictures when zoomed in
+      <span>Stops pictures breaking into blocky squares at high zoom. The pictures themselves are not changed, but some viewers draw zoomed pages more slowly with this on.</span></div>
+  </label>
+
+  <div class="smooth pick" id="enhanceRow">
+    <div><label for="enhance">Sharpen blurry pictures</label>
+      <select id="enhance">
+        <option value="" selected>Off: copy pictures untouched</option>
+        <option value="light">Light: crisper edges, nothing gets heavier</option>
+        <option value="balanced">Strong: enlarges pictures, heavier to scroll</option>
+        <option value="max">Maximum: sharpest, heaviest</option>
+      </select>
+      <span>Sharpens the edges in low-resolution pictures so text inside them looks crisper. Light keeps every picture at its size and format, so parts stay as quick to open and edit as the original. Strong and Maximum also enlarge pictures, which can lag. Sharpened pictures are re-saved rather than copied untouched, and no real detail is added.</span></div>
   </div>
 
   <div class="actions">
@@ -168,41 +159,18 @@ button.ghost { background: transparent; color: var(--ink); border: 1px solid var
     <div id="result"></div>
   </div>
 
+  <div class="error" id="error" role="alert"></div>
 
   <div class="facts">
-    <h2>Why Canva changes text, and how “For Canva” avoids it</h2>
-    <p>When Canva imports a PDF, it re-types the text with its own fonts, and Hindi conjuncts and matras get lost. In “For Canva” mode each slide is a single high-resolution picture, so there is no text for Canva to re-type: what you see is exactly what comes back.</p>
-    <h2>Original PDF mode</h2>
-    <p>Each page is moved into a new file with its images, fonts and graphics byte-for-byte identical. If several slides share an image or font, each part gets its own copy, so every part opens on its own.</p>
+    <h2>What happens to your slides</h2>
+    <p>With "text as shapes", pages are exact copies except for the text, which is redrawn as the letter shapes stored in the PDF's own fonts. Editors such as Canva replace real text with their own fonts when importing, which changes letters and moves lines; shapes cannot be re-typed. This works for the fonts that Canva, Chrome and Google tools put into PDFs. Pages with other kinds of font keep their ordinary text.</p>
+    <p>With "Locked pictures", each page is drawn the way a PDF viewer shows it and saved as a single picture. Nothing on it can be moved or re-typed, but text becomes part of the picture and is less sharp when zoomed. The rest of this section is about the exact copy.</p>
+    <p>Each page is moved into a new file with its fonts and graphics byte-for-byte identical, and its pictures too unless sharpening changes them. If several slides share an image or font, each part gets its own copy, so every part opens on its own.</p>
+    <p>Each part also keeps the document's layer settings and colour profile, so hidden layers stay hidden and colours look the same as in the original.</p>
+    <p>"Smooth pictures when zoomed in" adds a mark to each picture that tells the viewer to blend its pixels when enlarging, instead of drawing them as squares. It changes nothing in the picture itself.</p>
+    <p>"Sharpen blurry pictures" changes the pictures themselves. Light sharpens edges in pictures stored below 200 dots per inch and keeps their size, format and transparency, so nothing gets heavier and nothing moves. Strong and Maximum also enlarge those pictures to about 220 or 300 dots per inch and save them as high-quality JPEG: sharper at high zoom, but heavier to scroll, zoom and edit. No level adds real detail. For truly sharp slides, export them at a higher resolution before splitting.</p>
     <p>A single slide bigger than your limit can't be split further without changing it. It gets a part of its own, marked in orange.</p>
   </div>
-  </div>
-
-  <div id="panel-merge" role="tabpanel" aria-labelledby="tab-merge" hidden>
-    <label class="drop" id="mdrop">
-      <input type="file" id="mfile" accept="application/pdf,.pdf" multiple aria-label="Choose PDF files to merge">
-      <strong>Drop PDFs here or click to choose</strong>
-      <span>Pick several at once, or keep adding more</span>
-    </label>
-    <ol class="mlist" id="mlist" aria-label="Files to merge, in order"></ol>
-    <p class="mtotal" id="mtotal"></p>
-    <div class="actions">
-      <button id="mgo" disabled>Merge PDFs</button>
-      <button class="ghost" id="mclear" hidden>Clear list</button>
-    </div>
-    <div class="work" id="mwork" aria-live="polite">
-      <div class="status" id="mstatus"></div>
-      <div class="progress"><div id="mprogressFill"></div></div>
-      <div id="mresult"></div>
-    </div>
-    <div class="facts">
-      <h2>Nothing changes</h2>
-      <p>Every page is copied byte-for-byte, in the order shown. Images, fonts, colours and text stay exactly as they were in each file.</p>
-      <p>The merged file is about as big as all the files added together. If it's too big to send, open the Split tab to cut it into parts.</p>
-    </div>
-  </div>
-
-  <div class="error" id="error" role="alert"></div>
 </main>
 
 <script>
@@ -240,7 +208,13 @@ function unhookPageLinks(src) {
   }
 }
 
-// For each page: the set of objects it needs, and the size of each object
+// Document-level settings that decide how pages look: layer visibility, the document colour profile,
+// viewer preferences and language. Copying pages alone leaves these behind, which made hidden layers
+// show up in the parts and dropped the colour profile. Every part now carries them.
+const DOC_KEYS = ["OCProperties", "OutputIntents", "ViewerPreferences", "Lang"];
+
+// For each page: the set of objects it needs, and the size of each object.
+// Also the size of the document settings that go into every part.
 function measurePages(src) {
   const { PDFName, PDFArray, PDFDict, PDFRef, PDFStream, PDFRawStream } = PDFLib;
   const N = s => PDFName.of(s), ctx = src.context;
@@ -257,15 +231,8 @@ function measurePages(src) {
     sizeCache.set(k, s);
     return s;
   };
-  return src.getPages().map(page => {
-    const refs = new Map(), stack = [];
-    const node = page.node;
-    for (const [k, v] of node.entries()) if (k !== N("Parent")) stack.push(v);
-    for (const k of ["Resources", "MediaBox", "CropBox", "Rotate"]) {
-      if (!node.has(N(k))) { const inh = node.getInheritableAttribute(N(k)); if (inh) stack.push(inh); }
-    }
-    let base = 300;
-    try { base += node.sizeInBytes(); } catch {}
+  const reach = (stack) => {
+    const refs = new Map();
     while (stack.length) {
       const o = stack.pop();
       if (o instanceof PDFRef) {
@@ -279,17 +246,35 @@ function measurePages(src) {
       else if (o instanceof PDFDict) { for (const [k, v] of o.entries()) if (k !== N("Parent")) stack.push(v); }
       else if (o instanceof PDFArray) { for (const v of o.asArray()) stack.push(v); }
     }
-    return { base, refs };
+    return refs;
+  };
+  const pages = src.getPages().map(page => {
+    const stack = [], node = page.node;
+    for (const [k, v] of node.entries()) if (k !== N("Parent")) stack.push(v);
+    for (const k of ["Resources", "MediaBox", "CropBox", "Rotate"]) {
+      if (!node.has(N(k))) { const inh = node.getInheritableAttribute(N(k)); if (inh) stack.push(inh); }
+    }
+    let base = 300;
+    try { base += node.sizeInBytes(); } catch {}
+    return { base, refs: reach(stack) };
   });
+  let fixed = 0;
+  for (const k of DOC_KEYS) {
+    const v = src.catalog.get(N(k));
+    if (!v) continue;
+    fixed += 200;
+    for (const s of reach([v]).values()) fixed += s;
+  }
+  return { pages, fixed };
 }
 
 // How many pages from `start` fit under `budget`, by estimate
-function estimateEnd(measures, start, budget) {
+function estimateEnd(measures, start, budget, fixed, sizeOf = (k, s) => s) {
   const used = new Set();
-  let size = 2000, i = start;
+  let size = 2000 + fixed, i = start;
   while (i < measures.length) {
     let add = measures[i].base;
-    for (const [k, s] of measures[i].refs) if (!used.has(k)) add += s;
+    for (const [k, s] of measures[i].refs) if (!used.has(k)) add += sizeOf(k, s);
     if (i > start && size + add > budget) break;
     for (const k of measures[i].refs.keys()) used.add(k);
     size += add; i++;
@@ -297,18 +282,750 @@ function estimateEnd(measures, start, budget) {
   return i;
 }
 
-async function buildPart(src, start, end, title) {
-  const { PDFDocument } = PDFLib;
-  const out = await PDFDocument.create();
-  const idx = []; for (let i = start; i < end; i++) idx.push(i);
-  const pages = await out.copyPages(src, idx);
-  pages.forEach(p => out.addPage(p));
-  out.setTitle(title);
-  out.setProducer("PDF Splitter");
-  return await out.save({ useObjectStreams: true, addDefaultPage: false, updateFieldAppearances: false });
+// ---------- Optional: enlarge and sharpen low-resolution pictures ----------
+// Works on a copy inside each part. Pictures stored at 200 dpi or more are left alone.
+// "light" sharpens each picture at the size it already has: no extra pixels, same format, so nothing gets heavier.
+// "balanced" and "max" also enlarge, which looks sharper at high zoom but is heavier for viewers and editors to draw.
+const ENHANCE_LEVELS = {
+  light: { target: 0, maxK: 1, maxPixels: 0, minK: 9 },
+  balanced: { target: 220, maxK: 2, maxPixels: 6e6, minK: 1.3 },
+  max: { target: 300, maxK: 3, maxPixels: 16e6, minK: 1.5 },
+};
+// Factor to enlarge by; 1 means sharpen at the same size; 0 means leave the picture alone.
+function enhanceFactor(dpi, w, h, level, masked) {
+  if (!level || !(dpi > 0) || dpi >= 200 || w < 32 || h < 32) return 0;
+  if (masked) return 1;   // keep the size, so the picture and its transparency mask still line up
+  const k = Math.min(level.maxK, level.target / dpi, Math.sqrt(level.maxPixels / (w * h)));
+  return k >= level.minK ? k : 1;
 }
 
-async function splitPdf(bytes, limitBytes, baseName, progress, onPart) {
+function colourInfo(cs, ctx) {
+  const { PDFName, PDFArray, PDFNumber, PDFStream, PDFRawStream, PDFString, PDFHexString, decodePDFRawStream } = PDFLib;
+  const N = s => PDFName.of(s);
+  if (cs === N("DeviceRGB")) return { n: 3 };
+  if (cs === N("DeviceGray")) return { n: 1 };
+  if (!(cs instanceof PDFArray) || !cs.size()) return null;
+  const kind = cs.lookup(0);
+  if (kind === N("CalRGB")) return { n: 3 };
+  if (kind === N("CalGray")) return { n: 1 };
+  if (kind === N("ICCBased")) {
+    const st = cs.lookup(1);
+    const n = st instanceof PDFStream ? st.dict.lookup(N("N")) : null;
+    const v = n instanceof PDFNumber ? n.asNumber() : 0;
+    return v === 3 || v === 1 ? { n: v } : null;
+  }
+  if (kind === N("Indexed") && cs.size() >= 4) {
+    const base = colourInfo(cs.lookup(1), ctx);
+    if (!base || base.n !== 3 || base.palette) return null;
+    const t = cs.lookup(3);
+    let palette = null;
+    if (t instanceof PDFString || t instanceof PDFHexString) palette = t.asBytes();
+    else if (t instanceof PDFRawStream) palette = decodePDFRawStream(t).decode();
+    return palette ? { n: 3, palette, base: cs.get(1) } : null;
+  }
+  return null;
+}
+
+function undoPngPredictor(data, w, h, comps) {
+  const row = w * comps, out = new Uint8Array(row * h);
+  if (data.length < (row + 1) * h) return null;
+  for (let y = 0; y < h; y++) {
+    const f = data[y * (row + 1)], ip = y * (row + 1) + 1, op = y * row, up = op - row;
+    for (let x = 0; x < row; x++) {
+      const a = x >= comps ? out[op + x - comps] : 0, b = y ? out[up + x] : 0, c = (y && x >= comps) ? out[up + x - comps] : 0;
+      let p = 0;
+      if (f === 1) p = a; else if (f === 2) p = b; else if (f === 3) p = (a + b) >> 1;
+      else if (f === 4) { const pa = Math.abs(b - c), pb = Math.abs(a - c), pc = Math.abs(a + b - 2 * c); p = pa <= pb && pa <= pc ? a : pb <= pc ? b : c; }
+      out[op + x] = (data[ip + x] + p) & 255;
+    }
+  }
+  return out;
+}
+
+// Returns something drawable (bitmap or canvas) holding the picture's pixels, or null if this kind of picture is left alone.
+async function readPicture(o, ctx) {
+  const { PDFName, PDFArray, PDFDict, PDFNumber, PDFStream, PDFBool, decodePDFRawStream } = PDFLib;
+  const N = s => PDFName.of(s), d = o.dict;
+  const num = (dd, k) => { const v = dd.lookup(N(k)); return v instanceof PDFNumber ? v.asNumber() : 0; };
+  if (d.lookup(N("ImageMask")) === PDFBool.True || num(d, "BitsPerComponent") !== 8 || d.has(N("Decode"))) return null;
+  if (d.lookup(N("Mask")) instanceof PDFArray) return null;
+  const sm = d.lookup(N("SMask"));
+  if (sm instanceof PDFStream && sm.dict.has(N("Matte"))) return null;
+  const w = num(d, "Width"), h = num(d, "Height");
+  let filt = d.lookup(N("Filter"));
+  if (filt instanceof PDFArray) { if (filt.size() !== 1) return null; filt = filt.lookup(0); }
+  const cs = colourInfo(d.lookup(N("ColorSpace")), ctx);
+  if (!cs || !w || !h) return null;
+  const parms = d.lookup(N("DecodeParms"));
+  if (filt === N("DCTDecode")) {
+    if (cs.n !== 3 || cs.palette || parms) return null;
+    const bmp = await createImageBitmap(new Blob([o.contents], { type: "image/jpeg" }), { colorSpaceConversion: "none" });
+    if (bmp.width !== w || bmp.height !== h) { bmp.close(); return null; }
+    return { source: bmp, w, h, colorSpace: null, jpeg: true };
+  }
+  if (filt !== N("FlateDecode")) return null;
+  const comps = cs.palette ? 1 : cs.n;
+  let data = decodePDFRawStream(o).decode();
+  const pred = parms instanceof PDFDict ? (num(parms, "Predictor") || 1) : 1;
+  if (pred >= 10) data = undoPngPredictor(data, w, h, comps); else if (pred !== 1) return null;
+  if (!data || data.length < w * h * comps) return null;
+  const img = new ImageData(w, h), px = img.data, n = w * h;
+  if (cs.palette) { const p = cs.palette; for (let i = 0, j = 0; i < n; i++, j += 4) { const q = data[i] * 3; px[j] = p[q]; px[j + 1] = p[q + 1]; px[j + 2] = p[q + 2]; px[j + 3] = 255; } }
+  else if (comps === 3) { for (let i = 0, j = 0, q = 0; i < n; i++, j += 4, q += 3) { px[j] = data[q]; px[j + 1] = data[q + 1]; px[j + 2] = data[q + 2]; px[j + 3] = 255; } }
+  else { for (let i = 0, j = 0; i < n; i++, j += 4) { px[j] = px[j + 1] = px[j + 2] = data[i]; px[j + 3] = 255; } }
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  c.getContext("2d").putImageData(img, 0, 0);
+  return { source: c, w, h, colorSpace: cs.palette ? cs.base : cs.n === 1 ? N("DeviceRGB") : null, grey: !cs.palette && cs.n === 1, baseSpace: cs.palette ? cs.base : null };
+}
+
+// Unsharp mask on brightness only, so edges get crisper without colour fringes.
+function sharpenPixels(px, W, H, k, amount = 1.8) {
+  const n = W * H, r = Math.max(1, Math.round(k * 0.7));
+  let a = new Uint8Array(n), b = new Uint8Array(n);
+  const luma = new Uint8Array(n);
+  for (let i = 0, j = 0; i < n; i++, j += 4) luma[i] = (px[j] * 77 + px[j + 1] * 150 + px[j + 2] * 29) >> 8;
+  a.set(luma);
+  const d = 2 * r + 1;
+  for (let pass = 0; pass < 2; pass++) {
+    for (let y = 0; y < H; y++) {            // across
+      const o = y * W; let sum = a[o] * (r + 1);
+      for (let i = 1; i <= r; i++) sum += a[o + Math.min(i, W - 1)];
+      for (let x = 0; x < W; x++) { b[o + x] = sum / d; sum += a[o + Math.min(x + r + 1, W - 1)] - a[o + Math.max(x - r, 0)]; }
+    }
+    for (let x = 0; x < W; x++) {            // down
+      let sum = b[x] * (r + 1);
+      for (let i = 1; i <= r; i++) sum += b[Math.min(i, H - 1) * W + x];
+      for (let y = 0; y < H; y++) { a[y * W + x] = sum / d; sum += b[Math.min(y + r + 1, H - 1) * W + x] - b[Math.max(y - r, 0) * W + x]; }
+    }
+  }
+  for (let i = 0, j = 0; i < n; i++, j += 4) {
+    const diff = luma[i] - a[i];
+    if (diff > 2 || diff < -2) { const add = Math.max(-90, Math.min(90, diff * amount)); px[j] += add; px[j + 1] += add; px[j + 2] += add; }
+  }
+}
+
+async function deflateBytes(bytes, ctx) {
+  if (typeof CompressionStream !== "undefined") {
+    try { return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream("deflate"))).arrayBuffer()); } catch {}
+  }
+  return ctx.flateStream(bytes).contents;
+}
+
+async function enhancePicture(o, k, ctx) {
+  const pic = await readPicture(o, ctx);
+  if (!pic) return null;
+  const same = k === 1;
+  const W = same ? pic.w : Math.round(pic.w * k), H = same ? pic.h : Math.round(pic.h * k);
+  const c = document.createElement("canvas"); c.width = W; c.height = H;
+  const g = c.getContext("2d", { willReadFrequently: true });
+  g.imageSmoothingEnabled = !same; g.imageSmoothingQuality = "high";
+  g.drawImage(pic.source, 0, 0, W, H);
+  if (pic.source.close) pic.source.close();
+  const img = g.getImageData(0, 0, W, H);
+  sharpenPixels(img.data, W, H, k, same ? 1.4 : 1.8);
+  if (same && !pic.jpeg) {
+    // Same size, saved without loss in the same kind of format the picture already had
+    const px = img.data, n = W * H, comps = pic.grey ? 1 : 3, raw = new Uint8Array(n * comps);
+    if (pic.grey) for (let i = 0, j = 0; i < n; i++, j += 4) raw[i] = px[j];
+    else for (let i = 0, j = 0, q = 0; i < n; i++, j += 4, q += 3) { raw[q] = px[j]; raw[q + 1] = px[j + 1]; raw[q + 2] = px[j + 2]; }
+    c.width = c.height = 0;
+    return { bytes: await deflateBytes(raw, ctx), W, H, filter: "FlateDecode", colorSpace: pic.baseSpace };
+  }
+  g.putImageData(img, 0, 0);
+  const blob = await new Promise(res => c.toBlob(res, "image/jpeg", 0.93));
+  c.width = c.height = 0;
+  if (!blob) return null;
+  return { bytes: new Uint8Array(await blob.arrayBuffer()), W, H, filter: "DCTDecode", colorSpace: pic.colorSpace };
+}
+
+// ---------- Text to shapes ----------
+// Canva (and other editors) re-type the text of an imported PDF with their own fonts, which changes letters and moves lines.
+// Here the text is redrawn as the exact letter shapes taken from the fonts inside the PDF. It looks the same and stays
+// sharp at any zoom, but there is no text left for an editor to re-type. Pictures and everything else are not touched.
+class LeaveAsIs extends Error {}
+
+function parseTrueType(buf) {
+  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const tables = {};
+  const numTables = dv.getUint16(4);
+  for (let i = 0; i < numTables; i++) {
+    const p = 12 + i * 16;
+    tables[String.fromCharCode(buf[p], buf[p + 1], buf[p + 2], buf[p + 3])] = { off: dv.getUint32(p + 8), len: dv.getUint32(p + 12) };
+  }
+  for (const t of ["head", "maxp", "loca", "glyf"]) if (!tables[t]) throw new Error("not a TrueType outline font");
+  const upm = dv.getUint16(tables.head.off + 18), longLoca = dv.getInt16(tables.head.off + 50) === 1;
+  const numGlyphs = dv.getUint16(tables.maxp.off + 4);
+  const loca = g => longLoca ? dv.getUint32(tables.loca.off + g * 4) : dv.getUint16(tables.loca.off + g * 2) * 2;
+  const cache = new Map();
+  const contours = (gid, depth) => {
+    if (gid < 0 || gid >= numGlyphs || depth > 8) return [];
+    const a = loca(gid), b = loca(gid + 1);
+    if (b <= a) return [];
+    let p = tables.glyf.off + a;
+    const nc = dv.getInt16(p); p += 10;
+    const out = [];
+    if (nc >= 0) {
+      const ends = [];
+      for (let i = 0; i < nc; i++) { ends.push(dv.getUint16(p)); p += 2; }
+      const np = nc ? ends[nc - 1] + 1 : 0;
+      p += 2 + dv.getUint16(p);
+      const flags = new Uint8Array(np);
+      for (let i = 0; i < np;) { const f = buf[p++]; flags[i++] = f; if (f & 8) { let r = buf[p++]; while (r-- > 0 && i < np) flags[i++] = f; } }
+      const xs = new Int32Array(np), ys = new Int32Array(np);
+      let v = 0;
+      for (let i = 0; i < np; i++) { const f = flags[i]; if (f & 2) { const d = buf[p++]; v += (f & 16) ? d : -d; } else if (!(f & 16)) { v += dv.getInt16(p); p += 2; } xs[i] = v; }
+      v = 0;
+      for (let i = 0; i < np; i++) { const f = flags[i]; if (f & 4) { const d = buf[p++]; v += (f & 32) ? d : -d; } else if (!(f & 32)) { v += dv.getInt16(p); p += 2; } ys[i] = v; }
+      let s = 0;
+      for (const e of ends) { const c = []; for (let i = s; i <= e; i++) c.push([xs[i], ys[i], flags[i] & 1]); out.push(c); s = e + 1; }
+    } else {
+      for (;;) {
+        const f = dv.getUint16(p), g = dv.getUint16(p + 2); p += 4;
+        let dx = 0, dy = 0;
+        if (f & 1) { dx = dv.getInt16(p); dy = dv.getInt16(p + 2); p += 4; } else { dx = dv.getInt8(p); dy = dv.getInt8(p + 1); p += 2; }
+        if (!(f & 2)) { dx = 0; dy = 0; }
+        let m = [1, 0, 0, 1];
+        const F = () => { const x = dv.getInt16(p) / 16384; p += 2; return x; };
+        if (f & 8) { const sc = F(); m = [sc, 0, 0, sc]; } else if (f & 0x40) { m = [F(), 0, 0, F()]; } else if (f & 0x80) { m = [F(), F(), F(), F()]; }
+        for (const c of contours(g, depth + 1)) out.push(c.map(([x, y, on]) => [m[0] * x + m[2] * y + dx, m[1] * x + m[3] * y + dy, on]));
+        if (!(f & 0x20)) break;
+      }
+    }
+    return out;
+  };
+  // Drawing commands for one glyph, in font units: ["m",x,y] ["l",x,y] ["c",x1,y1,x2,y2,x3,y3] ["h"]
+  const glyph = (gid) => {
+    if (cache.has(gid)) return cache.get(gid);
+    const cmds = [];
+    for (const pts of contours(gid, 0)) {
+      const n = pts.length;
+      if (!n) continue;
+      let start, seq;
+      if (pts[0][2]) { start = pts[0]; seq = pts.slice(1); }
+      else if (pts[n - 1][2]) { start = pts[n - 1]; seq = pts.slice(0, n - 1); }
+      else { start = [(pts[n - 1][0] + pts[0][0]) / 2, (pts[n - 1][1] + pts[0][1]) / 2, 1]; seq = pts; }
+      cmds.push(["m", start[0], start[1]]);
+      let cur = start;
+      const quad = (q, e) => { cmds.push(["c", cur[0] + 2 / 3 * (q[0] - cur[0]), cur[1] + 2 / 3 * (q[1] - cur[1]), e[0] + 2 / 3 * (q[0] - e[0]), e[1] + 2 / 3 * (q[1] - e[1]), e[0], e[1]]); cur = e; };
+      for (let i = 0; i < seq.length;) {
+        const q = seq[i];
+        if (q[2]) { cmds.push(["l", q[0], q[1]]); cur = q; i++; continue; }
+        const nx = seq[i + 1];
+        if (nx && nx[2]) { quad(q, nx); i += 2; }
+        else if (nx) { quad(q, [(q[0] + nx[0]) / 2, (q[1] + nx[1]) / 2, 1]); i++; }
+        else { quad(q, start); i++; }
+      }
+      cmds.push(["h"]);
+    }
+    cache.set(gid, cmds);
+    return cmds;
+  };
+  return { matrix: [1 / upm, 0, 0, 1 / upm, 0, 0], glyph };
+}
+
+// Fonts whose letters are stored as small drawings (Type 3), as Chrome and Canva write them for some typefaces.
+// Only plain filled outlines are taken; anything else (bitmaps, colours) returns null and the font stays as text.
+function parseDrawnFont(font, ctx) {
+  const { PDFName, PDFArray, PDFDict, PDFNumber, PDFRawStream, decodePDFRawStream } = PDFLib;
+  const N = s => PDFName.of(s);
+  const fm = font.lookup(N("FontMatrix")), enc = font.lookup(N("Encoding")), procs = font.lookup(N("CharProcs"));
+  if (!(fm instanceof PDFArray) || fm.size() !== 6 || !(enc instanceof PDFDict) || !(procs instanceof PDFDict)) return null;
+  const matrix = fm.asArray().map(v => v instanceof PDFNumber ? v.asNumber() : NaN);
+  if (matrix.some(v => !isFinite(v))) return null;
+  const diff = enc.lookup(N("Differences"));
+  if (!(diff instanceof PDFArray)) return null;
+  const byCode = new Map();
+  let code = 0;
+  for (let i = 0; i < diff.size(); i++) { const v = diff.lookup(i); if (v instanceof PDFNumber) code = v.asNumber(); else if (v instanceof PDFName) byCode.set(code++, v); else return null; }
+  const shapes = new Map();
+  for (const [name, ref] of procs.entries()) {
+    const st = ctx.lookup(ref);
+    if (!(st instanceof PDFRawStream)) return null;
+    const words = String.fromCharCode.apply(null, decodePDFRawStream(st).decode()).split(/[\s\0]+/).filter(Boolean);
+    const cmds = [], a = [];
+    let cx = 0, cy = 0;
+    for (const w of words) {
+      if (/^[+-]?(\d+\.?\d*|\.\d+)$/.test(w)) { a.push(parseFloat(w)); continue; }
+      const k = a.length;
+      if (w === "d0" || w === "d1" || w === "f" || w === "F" || w === "n") {}
+      else if (w === "m" && k === 2) { cmds.push(["m", a[0], a[1]]); cx = a[0]; cy = a[1]; }
+      else if (w === "l" && k === 2) { cmds.push(["l", a[0], a[1]]); cx = a[0]; cy = a[1]; }
+      else if (w === "c" && k === 6) { cmds.push(["c", ...a]); cx = a[4]; cy = a[5]; }
+      else if (w === "v" && k === 4) { cmds.push(["c", cx, cy, ...a]); cx = a[2]; cy = a[3]; }
+      else if (w === "y" && k === 4) { cmds.push(["c", a[0], a[1], a[2], a[3], a[2], a[3]]); cx = a[2]; cy = a[3]; }
+      else if (w === "h" && k === 0) cmds.push(["h"]);
+      else if (w === "re" && k === 4) { cmds.push(["m", a[0], a[1]], ["l", a[0] + a[2], a[1]], ["l", a[0] + a[2], a[1] + a[3]], ["l", a[0], a[1] + a[3]], ["h"]); cx = a[0]; cy = a[1]; }
+      else return null;
+      a.length = 0;
+    }
+    shapes.set(name, cmds);
+  }
+  return { matrix, glyph: c => shapes.get(byCode.get(c)) || [] };
+}
+
+// What we know about one font: either its letter shapes, or just enough (widths) to keep it as normal text.
+function readFont(font, ctx) {
+  const { PDFName, PDFArray, PDFDict, PDFNumber, PDFRawStream, decodePDFRawStream } = PDFLib;
+  const N = s => PDFName.of(s);
+  const num = (d, k, dflt) => { const v = d.lookup(N(k)); return v instanceof PDFNumber ? v.asNumber() : dflt; };
+  if (!(font instanceof PDFDict)) return null;
+  const sub = font.lookup(N("Subtype"));
+  if (sub === N("Type0")) {
+    if (font.lookup(N("Encoding")) !== N("Identity-H")) return null;
+    const kids = font.lookup(N("DescendantFonts"));
+    const d = kids instanceof PDFArray && kids.size() ? kids.lookup(0) : null;
+    if (!(d instanceof PDFDict)) return null;
+    const dw = num(d, "DW", 1000), wmap = new Map(), W = d.lookup(N("W"));
+    if (W instanceof PDFArray) {
+      for (let i = 0; i < W.size();) {
+        const a = W.lookup(i), b = W.lookup(i + 1);
+        if (!(a instanceof PDFNumber)) return null;
+        if (b instanceof PDFArray) { for (let j = 0; j < b.size(); j++) { const w = b.lookup(j); wmap.set(a.asNumber() + j, w instanceof PDFNumber ? w.asNumber() : dw); } i += 2; }
+        else { const w = W.lookup(i + 2); if (!(b instanceof PDFNumber) || !(w instanceof PDFNumber) || b.asNumber() - a.asNumber() > 70000) return null; for (let c = a.asNumber(); c <= b.asNumber(); c++) wmap.set(c, w.asNumber()); i += 3; }
+      }
+    }
+    const width = c => wmap.has(c) ? wmap.get(c) : dw;
+    const fd = d.lookup(N("FontDescriptor"));
+    const file = fd instanceof PDFDict ? fd.lookup(N("FontFile2")) : null;
+    if (d.lookup(N("Subtype")) === N("CIDFontType2") && file instanceof PDFRawStream) {
+      try {
+        const tt = parseTrueType(decodePDFRawStream(file).decode());
+        const map = d.lookup(N("CIDToGIDMap"));
+        let gidOf = c => c;
+        if (map instanceof PDFRawStream) { const t = decodePDFRawStream(map).decode(); gidOf = c => (2 * c + 1 < t.length) ? (t[2 * c] << 8) | t[2 * c + 1] : 0; }
+        return { shapes: tt, bytes: 2, width, scale: 0.001, gidOf, spaceCode: -1 };
+      } catch {}
+    }
+    return { shapes: null, bytes: 2, width, scale: 0.001, spaceCode: -1 };
+  }
+  const widths = font.lookup(N("Widths"));
+  if (!(widths instanceof PDFArray)) return null;
+  const first = num(font, "FirstChar", 0), fd = font.lookup(N("FontDescriptor"));
+  const missing = fd instanceof PDFDict ? num(fd, "MissingWidth", 0) : 0;
+  let scale = 0.001, shapes = null;
+  if (sub === N("Type3")) {
+    const fm = font.lookup(N("FontMatrix")); const a = fm instanceof PDFArray ? fm.lookup(0) : null; if (!(a instanceof PDFNumber)) return null; scale = a.asNumber();
+    try { shapes = parseDrawnFont(font, ctx); } catch { shapes = null; }
+  }
+  const width = c => { const w = c >= first && c - first < widths.size() ? widths.lookup(c - first) : null; return w instanceof PDFNumber ? w.asNumber() : missing; };
+  return { shapes, bytes: 1, width, scale, gidOf: c => c, spaceCode: 32 };
+}
+
+// Rewrites one content stream. Throws LeaveAsIs when anything is unusual, so the caller keeps the original untouched.
+function textToShapes(src, resources, ctx, fonts, report) {
+  const { PDFName, PDFDict } = PDFLib;
+  const n = src.length, out = [];
+  const fontDict = resources instanceof PDFDict ? resources.lookup(PDFName.of("Font")) : null;
+  const isWs = c => c === 0 || c === 9 || c === 10 || c === 12 || c === 13 || c === 32;
+  const isDelim = c => c === 40 || c === 41 || c === 60 || c === 62 || c === 91 || c === 93 || c === 123 || c === 125 || c === 47 || c === 37;
+  const mul = (m, c) => [m[0] * c[0] + m[1] * c[2], m[0] * c[1] + m[1] * c[3], m[2] * c[0] + m[3] * c[2], m[2] * c[1] + m[3] * c[3], m[4] * c[0] + m[5] * c[2] + c[4], m[4] * c[1] + m[5] * c[3] + c[5]];
+  let i = 0;
+  const token = () => {
+    for (;;) {
+      while (i < n && isWs(src[i])) i++;
+      if (i < n && src[i] === 37) { while (i < n && src[i] !== 10 && src[i] !== 13) i++; continue; }
+      break;
+    }
+    if (i >= n) return null;
+    const s = i, c = src[i];
+    if (c === 40) {                                  // (literal string)
+      const b = []; let depth = 1; i++;
+      while (i < n && depth) {
+        let ch = src[i++];
+        if (ch === 92) {
+          ch = src[i++];
+          if (ch === 110) b.push(10); else if (ch === 114) b.push(13); else if (ch === 116) b.push(9); else if (ch === 98) b.push(8); else if (ch === 102) b.push(12);
+          else if (ch >= 48 && ch <= 55) { let v = ch - 48; for (let k = 0; k < 2 && src[i] >= 48 && src[i] <= 55; k++) v = v * 8 + src[i++] - 48; b.push(v & 255); }
+          else if (ch === 13) { if (src[i] === 10) i++; } else if (ch === 10) {} else b.push(ch);
+        } else if (ch === 40) { depth++; b.push(ch); } else if (ch === 41) { if (--depth) b.push(ch); } else b.push(ch);
+      }
+      if (depth) throw new LeaveAsIs();
+      return { t: "str", b, s, e: i };
+    }
+    if (c === 60) {
+      if (src[i + 1] === 60) { i += 2; for (;;) { const k = token(); if (!k) throw new LeaveAsIs(); if (k.t === "dictend") break; } return { t: "dict", s, e: i }; }
+      const b = []; let hi = -1; i++;
+      for (; i < n && src[i] !== 62; i++) { const h = src[i]; const v = h >= 48 && h <= 57 ? h - 48 : h >= 65 && h <= 70 ? h - 55 : h >= 97 && h <= 102 ? h - 87 : -1; if (v < 0) continue; if (hi < 0) hi = v; else { b.push(hi * 16 + v); hi = -1; } }
+      if (i >= n) throw new LeaveAsIs();
+      if (hi >= 0) b.push(hi * 16);
+      i++;
+      return { t: "str", b, s, e: i };
+    }
+    if (c === 62) { if (src[i + 1] !== 62) throw new LeaveAsIs(); i += 2; return { t: "dictend", s, e: i }; }
+    if (c === 91) { i++; const items = []; for (;;) { const k = token(); if (!k) throw new LeaveAsIs(); if (k.t === "arrend") break; items.push(k); } return { t: "arr", items, s, e: i }; }
+    if (c === 93) { i++; return { t: "arrend", s, e: i }; }
+    if (c === 47) { i++; while (i < n && !isWs(src[i]) && !isDelim(src[i])) i++; return { t: "name", v: String.fromCharCode.apply(null, src.subarray(s + 1, i)), s, e: i }; }
+    if (c === 123 || c === 125 || c === 41) throw new LeaveAsIs();
+    while (i < n && !isWs(src[i]) && !isDelim(src[i])) i++;
+    const w = String.fromCharCode.apply(null, src.subarray(s, i));
+    if (/^[+-]?(\d+\.?\d*|\.\d+)$/.test(w)) return { t: "num", v: parseFloat(w), s, e: i };
+    if (w === "true" || w === "false" || w === "null") return { t: "raw", s, e: i };
+    return { t: "op", v: w, s, e: i };
+  };
+
+  let gs = { fontName: null, font: undefined, size: 0, Tc: 0, Tw: 0, Th: 1, TL: 0, Ts: 0, Tr: 0 };
+  let ctm = [1, 0, 0, 1, 0, 0], Tm = [1, 0, 0, 1, 0, 0], Tlm = Tm;
+  const stack = [];
+  let path = [], pathMode = 0, digits = 3;
+  const fmt = v => { let s = v.toFixed(digits); if (digits) s = s.replace(/\.?0+$/, ""); return s === "-0" ? "0" : s; };
+  const flush = () => {
+    if (path.length) { out.push(path.join(" ") + (pathMode === 1 ? " S\n" : pathMode === 2 ? " B\n" : " f\n")); report.shapes++; }
+    path = [];
+  };
+  const pass = (ops, tok) => { flush(); out.push(src.subarray(ops.length ? ops[0].s : tok.s, tok.e), "\n"); };
+  const need = (ops, k) => { if (ops.length < k) throw new LeaveAsIs(); for (let j = ops.length - k; j < ops.length; j++) if (ops[j].t !== "num") throw new LeaveAsIs(); return ops.slice(ops.length - k).map(o => o.v); };
+  const font = () => {
+    if (gs.font !== undefined) return gs.font;
+    const d = gs.fontName !== null && fontDict instanceof PDFDict ? fontDict.lookup(PDFName.of(gs.fontName)) : null;
+    if (!d) throw new LeaveAsIs();
+    if (!fonts.has(d)) fonts.set(d, readFont(d, ctx));
+    gs.font = fonts.get(d);
+    if (!gs.font) throw new LeaveAsIs();
+    return gs.font;
+  };
+  const move = (tx, ty) => { Tlm = mul([1, 0, 0, 1, tx, ty], Tlm); Tm = Tlm; };
+  const advance = tx => { Tm = mul([1, 0, 0, 1, tx, 0], Tm); };
+  const show = (items, raw, op) => {
+    const f = font();
+    if (gs.Tr >= 4) throw new LeaveAsIs();
+    if (!f.shapes) {
+      // A font we cannot take shapes from: keep it as ordinary text, placed exactly where it was
+      flush();
+      report.keptFonts.add(gs.fontName);
+      let s = `BT /${gs.fontName} ${gs.size} Tf`;
+      if (gs.Tc) s += ` ${gs.Tc} Tc`; if (gs.Tw) s += ` ${gs.Tw} Tw`; if (gs.Th !== 1) s += ` ${gs.Th * 100} Tz`; if (gs.Ts) s += ` ${gs.Ts} Ts`; if (gs.Tr) s += ` ${gs.Tr} Tr`;
+      out.push(s + ` ${Tm.join(" ")} Tm `, src.subarray(raw.s, raw.e), ` ${op} ET\n`);
+      report.kept++;
+    } else {
+      if (path.length && pathMode !== gs.Tr) flush();
+      pathMode = gs.Tr;
+      const sc = Math.sqrt(Math.abs(ctm[0] * ctm[3] - ctm[1] * ctm[2])) || 1;
+      digits = Math.max(1, Math.min(6, Math.ceil(Math.log10(sc * 500))));
+      report.drawn++;
+    }
+    for (const it of items) {
+      if (it.t === "num") { advance(-it.v / 1000 * gs.size * gs.Th); continue; }
+      if (it.t !== "str") throw new LeaveAsIs();
+      const b = it.b;
+      if (f.bytes === 2 && b.length % 2) throw new LeaveAsIs();
+      for (let k = 0; k < b.length; k += f.bytes) {
+        const code = f.bytes === 2 ? (b[k] << 8) | b[k + 1] : b[k];
+        if (f.shapes && gs.Tr !== 3) {
+          const m = mul(mul(f.shapes.matrix, [gs.size * gs.Th, 0, 0, gs.size, 0, gs.Ts]), Tm);
+          for (const c of f.shapes.glyph(f.gidOf(code))) {
+            if (c[0] === "h") { path.push("h"); continue; }
+            for (let q = 1; q < c.length; q += 2) path.push(fmt(m[0] * c[q] + m[2] * c[q + 1] + m[4]), fmt(m[1] * c[q] + m[3] * c[q + 1] + m[5]));
+            path.push(c[0]);
+          }
+        }
+        advance((f.width(code) * f.scale * gs.size + gs.Tc + (code === f.spaceCode ? gs.Tw : 0)) * gs.Th);
+      }
+    }
+  };
+
+  let ops = [];
+  for (let tok = token(); tok; tok = token()) {
+    if (tok.t !== "op") { if (tok.t === "dictend" || tok.t === "arrend") throw new LeaveAsIs(); ops.push(tok); continue; }
+    switch (tok.v) {
+      case "BT": flush(); Tm = Tlm = [1, 0, 0, 1, 0, 0]; break;
+      case "ET": flush(); break;
+      case "q": stack.push([{ ...gs }, ctm]); pass(ops, tok); break;
+      case "Q": if (stack.length) [gs, ctm] = stack.pop(); pass(ops, tok); break;
+      case "cm": ctm = mul(need(ops, 6), ctm); pass(ops, tok); break;
+      case "Tf": { const [size] = need(ops, 1); const nm = ops[ops.length - 2]; if (!nm || nm.t !== "name") throw new LeaveAsIs(); gs.fontName = nm.v; gs.size = size; gs.font = undefined; break; }
+      case "Td": { const [x, y] = need(ops, 2); move(x, y); break; }
+      case "TD": { const [x, y] = need(ops, 2); gs.TL = -y; move(x, y); break; }
+      case "Tm": Tm = Tlm = need(ops, 6); break;
+      case "T*": move(0, -gs.TL); break;
+      case "Tc": [gs.Tc] = need(ops, 1); break;
+      case "Tw": [gs.Tw] = need(ops, 1); break;
+      case "Tz": gs.Th = need(ops, 1)[0] / 100; break;
+      case "TL": [gs.TL] = need(ops, 1); break;
+      case "Ts": [gs.Ts] = need(ops, 1); break;
+      case "Tr": [gs.Tr] = need(ops, 1); break;
+      case "Tj": { const o = ops[ops.length - 1]; if (!o || o.t !== "str") throw new LeaveAsIs(); show([o], o, "Tj"); break; }
+      case "TJ": { const o = ops[ops.length - 1]; if (!o || o.t !== "arr") throw new LeaveAsIs(); show(o.items, o, "TJ"); break; }
+      case "'": { const o = ops[ops.length - 1]; if (!o || o.t !== "str") throw new LeaveAsIs(); move(0, -gs.TL); show([o], o, "Tj"); break; }
+      case '"': { const o = ops[ops.length - 1]; if (!o || o.t !== "str" || ops.length < 3 || ops[ops.length - 3].t !== "num" || ops[ops.length - 2].t !== "num") throw new LeaveAsIs(); gs.Tw = ops[ops.length - 3].v; gs.Tc = ops[ops.length - 2].v; move(0, -gs.TL); show([o], o, "Tj"); break; }
+      case "BI": {                                   // picture written inside the page instructions: copy it byte for byte
+        flush();
+        for (;;) { const k = token(); if (!k) throw new LeaveAsIs(); if (k.t === "op" && k.v === "ID") break; }
+        let j = i + 1;
+        for (; j + 1 < n; j++) if (src[j] === 69 && src[j + 1] === 73 && isWs(src[j - 1]) && (j + 2 >= n || isWs(src[j + 2]))) break;
+        if (j + 1 >= n) throw new LeaveAsIs();
+        out.push(src.subarray(tok.s, j + 2), "\n"); i = j + 2;
+        break;
+      }
+      default: pass(ops, tok);
+    }
+    ops = [];
+  }
+  flush();
+  if (ops.length) throw new LeaveAsIs();
+  let len = 0;
+  const parts = out.map(p => { if (typeof p === "string") { const b = new Uint8Array(p.length); for (let k = 0; k < p.length; k++) b[k] = p.charCodeAt(k); p = b; } len += p.length; return p; });
+  const res = new Uint8Array(len); let o = 0;
+  for (const p of parts) { res.set(p, o); o += p.length; }
+  return res;
+}
+
+// Converts the text of every page (and of the reusable drawings pages refer to) in a finished part.
+function outlinePart(out, report) {
+  const { PDFName, PDFArray, PDFDict, PDFRef, PDFRawStream, decodePDFRawStream } = PDFLib;
+  const N = s => PDFName.of(s), ctx = out.context;
+  const fonts = new Map(), done = new Set(), fontUse = new Map();
+  const fresh = () => ({ shapes: 0, drawn: 0, kept: 0, keptFonts: new Set() });
+  const note = (resources, r, ok) => {
+    const fd = resources instanceof PDFDict ? resources.lookup(N("Font")) : null;
+    if (!(fd instanceof PDFDict)) return;
+    const u = fontUse.get(fd) || { keep: new Set(), ok: true };
+    if (!ok) u.ok = false; else for (const k of r.keptFonts) u.keep.add(k);
+    fontUse.set(fd, u);
+  };
+  const forms = (resources, inherited, depth) => {
+    const xo = resources instanceof PDFDict ? resources.lookup(N("XObject")) : null;
+    if (!(xo instanceof PDFDict) || depth > 6) return true;
+    let allOk = true;
+    for (const [, v] of xo.entries()) {
+      if (!(v instanceof PDFRef) || done.has(v.toString())) continue;
+      const x = ctx.lookup(v);
+      if (!(x instanceof PDFRawStream) || x.dict.lookup(N("Subtype")) !== N("Form")) continue;
+      done.add(v.toString());
+      const res = x.dict.lookup(N("Resources")) || inherited;
+      const r = fresh();
+      try {
+        const bytes = textToShapes(decodePDFRawStream(x).decode(), res, ctx, fonts, r);
+        if (r.drawn) {
+          const d = x.dict; d.delete(N("DecodeParms"));
+          const packed = ctx.flateStream(bytes);
+          d.set(N("Filter"), N("FlateDecode"));
+          ctx.assign(v, PDFRawStream.of(d, packed.contents));
+        }
+        note(res, r, true); report.shapes += r.shapes; report.kept += r.kept;
+      } catch (e) { if (!(e instanceof LeaveAsIs)) throw e; note(res, r, false); allOk = false; }
+      if (!forms(res, res, depth + 1)) allOk = false;
+    }
+    return allOk;
+  };
+  for (const page of out.getPages()) {
+    const node = page.node, resources = node.Resources();
+    const r = fresh();
+    let ok = true, hadText = false;
+    try {
+      const c = node.Contents();
+      const list = c instanceof PDFArray ? c.asArray().map(x => ctx.lookup(x)) : c ? [c] : [];
+      const chunks = list.map(st => { if (!(st instanceof PDFRawStream)) throw new LeaveAsIs(); return decodePDFRawStream(st).decode(); });
+      let len = 0; for (const b of chunks) len += b.length + 1;
+      const all = new Uint8Array(len); let o = 0;
+      for (const b of chunks) { all.set(b, o); o += b.length; all[o++] = 10; }
+      const bytes = textToShapes(all, resources, ctx, fonts, r);
+      hadText = r.drawn + r.kept > 0;
+      if (r.drawn) node.set(N("Contents"), ctx.register(ctx.flateStream(bytes)));
+      note(resources, r, true);
+    } catch (e) { if (!(e instanceof LeaveAsIs)) throw e; ok = false; note(resources, r, false); }
+    if (!forms(resources, resources, 0)) ok = false;
+    report.pages++;
+    if (!ok || r.kept) report.pagesWithText++;
+    report.shapes += r.shapes; report.kept += r.kept;
+  }
+  // Fonts that no page instruction uses any more are taken off the pages, then everything unreachable is dropped from the file
+  for (const [fd, u] of fontUse) if (u.ok) for (const [k] of fd.entries()) if (!u.keep.has(k.decodeText ? k.decodeText() : k.asString().slice(1))) fd.delete(k);
+  const keep = new Set(), todo = [ctx.trailerInfo.Root, ctx.trailerInfo.Info];
+  while (todo.length) {
+    const o = todo.pop();
+    if (o instanceof PDFRef) { const k = o.toString(); if (keep.has(k)) continue; keep.add(k); const v = ctx.lookup(o); if (v) todo.push(v); }
+    else if (o instanceof PDFDict) { for (const [, v] of o.entries()) todo.push(v); }
+    else if (o instanceof PDFArray) { for (const v of o.asArray()) todo.push(v); }
+    else if (o && o.dict instanceof PDFDict) { for (const [, v] of o.dict.entries()) todo.push(v); }
+  }
+  for (const [ref] of ctx.enumerateIndirectObjects()) if (!keep.has(ref.toString())) ctx.delete(ref);
+}
+
+// Chrome's PDF viewer runs text recognition on every picture of any page that has no text at all, and redraws the page
+// afterwards, which makes such pages stutter while scrolling. One invisible dot of real text per page tells Chrome
+// there is nothing to recognise. It is drawn first, in invisible mode, so it cannot show or cover anything.
+function addTextMarker(out) {
+  const { PDFName, PDFArray, PDFDict } = PDFLib;
+  const N = s => PDFName.of(s), ctx = out.context;
+  const font = ctx.register(ctx.obj({ Type: "Font", Subtype: "Type1", BaseFont: "Helvetica", Encoding: "WinAnsiEncoding" }));
+  for (const page of out.getPages()) {
+    const node = page.node;
+    let res = node.Resources();
+    if (!(res instanceof PDFDict)) { res = ctx.obj({}); node.set(N("Resources"), res); }
+    let fonts = res.lookup(N("Font"));
+    if (!(fonts instanceof PDFDict)) { fonts = ctx.obj({}); res.set(N("Font"), fonts); }
+    let name = "SplitDot";
+    while (fonts.has(N(name)) && fonts.get(N(name)) !== font) name += "x";
+    fonts.set(N(name), font);
+    let x = 0, y = 0;
+    try { const b = page.getCropBox(); x = b.x; y = b.y; } catch {}
+    const dot = ctx.register(ctx.stream(`q BT /${name} 1 Tf 3 Tr 1 0 0 1 ${x + 2} ${y + 2} Tm (.) Tj ET Q\n`));
+    const raw = node.get(N("Contents")), now = raw ? ctx.lookup(raw) : null;
+    const rest = now instanceof PDFArray ? now.asArray() : raw ? [raw] : [];
+    node.set(N("Contents"), ctx.obj([dot, ...rest]));
+  }
+}
+
+async function buildPart(src, measures, start, end, title, opt) {
+  const { PDFDocument, PDFObjectCopier, PDFPage, PDFName, PDFNumber, PDFStream, PDFRawStream, PDFBool } = PDFLib;
+  const N = s => PDFName.of(s);
+  const out = await PDFDocument.create();
+  // One copier for the pages and the document settings, so the layers used on the pages
+  // and the layers listed in the settings are the same objects in the new file.
+  const copier = PDFObjectCopier.for(src.context, out.context);
+  const srcPages = src.getPages();
+  for (let i = start; i < end; i++) {
+    const node = copier.copy(srcPages[i].node);
+    out.addPage(PDFPage.of(node, out.context.register(node), out));
+  }
+  for (const k of DOC_KEYS) {
+    const v = src.catalog.get(N(k));
+    if (v) out.catalog.set(N(k), copier.copy(v));
+  }
+  // Optional: replace low-resolution pictures in this part with enlarged, sharpened versions.
+  const enhanced = new Set();
+  if (opt.enhance) {
+    const E = opt.enhance, keys = new Set();
+    for (let i = start; i < end; i++) for (const k of measures[i].refs.keys()) if (E.plan.has(k)) keys.add(k);
+    let done = 0;
+    for (const k of keys) {
+      const p = E.plan.get(k);
+      let e = E.cache.get(k);
+      if (e === undefined) {
+        opt.note && opt.note(`Sharpening pictures for pages ${start + 1}\u2013${end} (${done + 1} of ${keys.size})`);
+        await tick();
+        const o = src.context.lookup(p.ref);
+        try { e = o instanceof PDFRawStream ? await enhancePicture(o, p.k, src.context) : null; } catch { e = null; }
+        E.cache.set(k, e || null);
+        if (e) { E.before += o.contents.length; E.after += e.bytes.length; }
+      }
+      done++;
+      if (!e) continue;
+      const ref = copier.copy(p.ref), dst = out.context.lookup(ref);
+      if (!(dst instanceof PDFRawStream)) continue;
+      const d = dst.dict;
+      d.set(N("Width"), PDFNumber.of(e.W)); d.set(N("Height"), PDFNumber.of(e.H));
+      d.set(N("BitsPerComponent"), PDFNumber.of(8)); d.set(N("Filter"), N(e.filter)); d.delete(N("DecodeParms"));
+      if (e.colorSpace) d.set(N("ColorSpace"), e.colorSpace instanceof PDFName ? e.colorSpace : copier.copy(e.colorSpace));
+      out.context.assign(ref, PDFRawStream.of(d, e.bytes));
+      enhanced.add(k);
+    }
+  }
+  // Ask viewers to scale pictures smoothly. Without this mark, Chrome, Edge, Acrobat and most phone
+  // viewers draw each picture pixel as a hard square once you zoom in. The picture data is untouched.
+  if (opt.smooth) {
+    for (const [, o] of out.context.enumerateIndirectObjects()) {
+      if (o instanceof PDFStream && o.dict.lookup(N("Subtype")) === N("Image")) o.dict.set(N("Interpolate"), PDFBool.True);
+    }
+  }
+  out.setTitle(title);
+  out.setProducer("PDF Splitter");
+  const text = { pages: 0, pagesWithText: 0, shapes: 0, kept: 0 };
+  if (opt.outline) { outlinePart(out, text); if (opt.marker) addTextMarker(out); }
+  const data = await out.save({ useObjectStreams: true, addDefaultPage: false, updateFieldAppearances: false });
+  return { data, enhanced, text };
+}
+
+// What picture quality the chosen file actually holds. For each page, find the picture drawn largest
+// and work out its dots per inch from the pixels it has and the size it is drawn at.
+function pictureQuality(src) {
+  const { PDFName, PDFDict, PDFArray, PDFNumber, PDFRef, PDFStream, PDFRawStream, decodePDFRawStream } = PDFLib;
+  if (!decodePDFRawStream) return null;
+  const N = s => PDFName.of(s), ctx = src.context;
+  const drawn = new Map();
+  const latin1 = new TextDecoder("latin1");
+  const textOf = (o) => {
+    const list = o instanceof PDFArray ? o.asArray().map(x => ctx.lookup(x)) : [o];
+    let t = "";
+    for (const st of list) {
+      if (!(st instanceof PDFRawStream) || st.contents.length > 8e6) continue;
+      t += latin1.decode(decodePDFRawStream(st).decode()) + "\n";
+    }
+    return t.replace(/\((?:\\.|[^\\()])*\)/g, "()");
+  };
+  const mul = (m, c) => [m[0]*c[0] + m[1]*c[2], m[0]*c[1] + m[1]*c[3], m[2]*c[0] + m[3]*c[2], m[2]*c[1] + m[3]*c[3], m[4]*c[0] + m[5]*c[2] + c[4], m[4]*c[1] + m[5]*c[3] + c[5]];
+  const num = (d, k) => { const v = d.lookup(N(k)); return v instanceof PDFNumber ? v.asNumber() : 0; };
+  const OPS = /\/([^\s\/\[\]<>(){}%]+)\s*Do(?![A-Za-z*'"])|((?:[-+]?(?:\d+\.?\d*|\.\d+)\s+){6})cm(?![A-Za-z*'"])|(?:^|[\s\])>])([qQ])(?=$|[\s\[<\/(])/g;
+  const walk = (text, res, ctm, depth, found) => {
+    const xo = res instanceof PDFDict ? res.lookup(N("XObject")) : null;
+    const stack = [];
+    let m; const re = new RegExp(OPS.source, "g");
+    while ((m = re.exec(text))) {
+      if (m[3] === "q") stack.push(ctm);
+      else if (m[3] === "Q") { if (stack.length) ctm = stack.pop(); }
+      else if (m[2]) ctm = mul(m[2].trim().split(/\s+/).map(Number), ctm);
+      else if (xo instanceof PDFDict) {
+        const raw = xo.get(N(m[1])), x = ctx.lookup(raw);
+        if (!(x instanceof PDFStream)) continue;
+        const sub = x.dict.lookup(N("Subtype"));
+        if (sub === N("Image")) {
+          const w = num(x.dict, "Width"), h = num(x.dict, "Height");
+          const wPt = Math.hypot(ctm[0], ctm[1]), hPt = Math.hypot(ctm[2], ctm[3]);
+          if (w > 1 && h > 1 && wPt > 0 && hPt > 0) {
+            const dpi = (w / wPt + h / hPt) * 36;
+            found.push({ w, h, area: wPt * hPt, dpi });
+            if (raw instanceof PDFRef) { const k = raw.toString(), old = drawn.get(k); if (!old || dpi < old.dpi) drawn.set(k, { ref: raw, dpi, w, h }); }
+          }
+        } else if (sub === N("Form") && depth < 4) {
+          const mx = x.dict.lookup(N("Matrix"));
+          const fm = mx instanceof PDFArray && mx.size() === 6 ? mx.asArray().map(v => v instanceof PDFNumber ? v.asNumber() : 0) : [1, 0, 0, 1, 0, 0];
+          walk(textOf(x), x.dict.lookup(N("Resources")) || res, mul(fm, ctm), depth + 1, found);
+        }
+      }
+    }
+  };
+  const mains = [];
+  src.getPages().forEach((page, i) => {
+    try {
+      const found = [];
+      const contents = page.node.Contents();
+      if (!contents) return;
+      walk(textOf(contents), page.node.Resources(), [1, 0, 0, 1, 0, 0], 0, found);
+      const { width, height } = page.getSize();
+      const top = found.sort((a, b) => b.area - a.area)[0];
+      if (top && top.area >= 0.15 * width * height) mains.push({ page: i + 1, w: top.w, h: top.h, dpi: top.dpi });
+    } catch {}
+  });
+  if (!mains.length) return { count: 0, drawn };
+  const sorted = mains.slice().sort((a, b) => a.dpi - b.dpi);
+  const mid = sorted[Math.floor((sorted.length - 1) / 2)];
+  return { count: mains.length, median: Math.round(mid.dpi), min: Math.round(sorted[0].dpi), max: Math.round(sorted[sorted.length - 1].dpi), example: mid, drawn };
+}
+
+// After a part is built, read the finished file back and make sure every picture that the pages needed
+// is in it with exactly the same data as in the chosen file.
+const pictureSigs = new WeakMap();
+function pictureSig(o) {
+  if (pictureSigs.has(o)) return pictureSigs.get(o);
+  const { PDFName } = PDFLib;
+  let h = 0x811c9dc5; const c = o.contents;
+  for (let i = 0; i < c.length; i++) h = Math.imul(h ^ c[i], 0x01000193);
+  const sig = o.dict.lookup(PDFName.of("Width")) + "x" + o.dict.lookup(PDFName.of("Height")) + ":" + c.length + ":" + (h >>> 0);
+  pictureSigs.set(o, sig);
+  return sig;
+}
+async function checkPart(src, measures, start, end, data, skip) {
+  const { PDFDocument, PDFName, PDFRef, PDFRawStream } = PDFLib;
+  const isPicture = o => o instanceof PDFRawStream && o.dict.lookup(PDFName.of("Subtype")) === PDFName.of("Image");
+  const have = new Map();
+  const made = await PDFDocument.load(data, { updateMetadata: false });
+  for (const [, o] of made.context.enumerateIndirectObjects()) if (isPicture(o)) { const s = pictureSig(o); have.set(s, (have.get(s) || 0) + 1); }
+  const keys = new Set();
+  for (let i = start; i < end; i++) for (const k of measures[i].refs.keys()) keys.add(k);
+  let total = 0, same = 0;
+  for (const k of keys) {
+    if (skip && skip.has(k)) continue;
+    const [n, g] = k.split(" ");
+    const o = src.context.lookup(PDFRef.of(+n, +g));
+    if (!isPicture(o)) continue;
+    total++;
+    const s = pictureSig(o), left = have.get(s) || 0;
+    if (left > 0) { same++; have.set(s, left - 1); }
+  }
+  return { total, same };
+}
+
+async function splitPdf(bytes, limitBytes, baseName, progress, onPart, smooth = true, enhance = false, outline = false, marker = true) {
   progress(0.02, "Reading the PDF");
   await tick();
   const src = await loadSource(bytes);
@@ -317,136 +1034,162 @@ async function splitPdf(bytes, limitBytes, baseName, progress, onPart) {
   unhookPageLinks(src);
   progress(0.06, "Measuring each slide");
   await tick();
-  const measures = measurePages(src);
+  const { pages: measures, fixed } = measurePages(src);
+  let quality = null;
+  try { quality = pictureQuality(src); } catch {}
+  const checked = { total: 0, same: 0, failed: false, sharpened: 0 };
+  const textDone = { pages: 0, pagesWithText: 0, shapes: 0 };
+  // Which pictures to enlarge and sharpen, and by how much
+  let E = null;
+  const level = ENHANCE_LEVELS[enhance === true ? "light" : enhance];
+  if (level && quality && quality.drawn && typeof document !== "undefined") {
+    E = { plan: new Map(), cache: new Map(), before: 0, after: 0 };
+    const N = s => PDFLib.PDFName.of(s);
+    for (const [k, p] of quality.drawn) {
+      const o = src.context.lookup(p.ref);
+      const masked = !!(o && o.dict && (o.dict.has(N("SMask")) || o.dict.has(N("Mask"))));
+      const f = enhanceFactor(p.dpi, p.w, p.h, level, masked);
+      if (f) E.plan.set(k, { ref: p.ref, k: f });
+    }
+    if (!E.plan.size) E = null;
+  }
+  const sizeOf = !E ? undefined : (k, s) => {
+    if (!E.plan.has(k)) return s;
+    const e = E.cache.get(k);
+    return e ? e.bytes.length + 300 : e === null ? s : s * (E.before ? E.after / E.before : 1);
+  };
+  // Keep a sharpened picture in memory only until the last page that uses it has been written
+  const lastUse = new Map();
+  if (E) measures.forEach((m, i) => { for (const k of m.refs.keys()) if (E.plan.has(k)) lastUse.set(k, i); });
   const budget = limitBytes * 0.985;
   const parts = [];
   let start = 0;
   while (start < n) {
-    let end = estimateEnd(measures, start, budget);
-    let data;
+    let end = estimateEnd(measures, start, budget, fixed, sizeOf);
+    let best = null, last = null, tooMany = Infinity;
     for (let attempt = 0; attempt < 12; attempt++) {
       progress(0.08 + 0.9 * start / n, `Building part ${parts.length + 1} (pages ${start + 1}–${end} of ${n})`);
       await tick();
-      data = await buildPart(src, start, end, `${baseName} (part ${parts.length + 1})`);
-      if (data.length <= limitBytes || end - start === 1) break;
-      // Estimate was a little off: shrink proportionally and try again
-      const keep = Math.max(1, Math.min(end - start - 1, Math.floor((end - start) * budget / data.length)));
-      end = start + keep;
+      const partNo = parts.length + 1, at = 0.08 + 0.9 * start / n;
+      last = await buildPart(src, measures, start, end, `${baseName} (part ${partNo})`, { smooth, enhance: E, outline, marker, note: m => progress(at, m) });
+      last.end = end;
+      if (last.data.length <= limitBytes || end - start === 1) {
+        best = last;
+        // With sharpening the first guess can be too cautious: now that real sizes are known, see if more pages fit
+        if (!E || end >= n) break;
+        const more = Math.min(estimateEnd(measures, start, budget, fixed, sizeOf), tooMany - 1);
+        if (more <= end) break;
+        end = more;
+      } else {
+        tooMany = end;
+        if (best) break;
+        // Estimate was a little off: shrink proportionally and try again
+        const keep = Math.max(1, Math.min(end - start - 1, Math.floor((end - start) * budget / last.data.length)));
+        end = start + keep;
+      }
     }
+    const { data, enhanced, text } = best || last;
+    textDone.pages += text.pages; textDone.pagesWithText += text.pagesWithText; textDone.shapes += text.shapes;
+    end = (best || last).end;
+    progress(0.08 + 0.9 * end / n, `Checking part ${parts.length + 1} against your file`);
+    await tick();
+    try { const c = await checkPart(src, measures, start, end, data, enhanced); checked.total += c.total; checked.same += c.same; }
+    catch { checked.failed = true; }
+    checked.sharpened += enhanced.size;
+    if (E) for (const [k, i] of lastUse) if (i < end && E.cache.get(k)) E.cache.delete(k);
     const part = { start, end, bytes: data, over: data.length > limitBytes };
     parts.push(part);
     onPart && onPart(part, parts.length);
     start = end;
   }
   progress(1, "Done");
-  return { parts, pages: n };
+  return { parts, pages: n, quality, checked, text: outline ? textDone : null };
+}
+// ---------- Locked pages: draw each page as one picture ----------
+// For Canva and other editors that rebuild a PDF on import. A picture cannot be re-typeset, so nothing on the page can move or change.
+const PDFJS_BASE = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
+const PDFJS_EXTRAS = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/";
+let pdfjsReady = null;
+function loadPdfJs() {
+  if (!pdfjsReady) pdfjsReady = new Promise((resolve, reject) => {
+    const ready = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_BASE + "pdf.worker.min.js"; resolve(window.pdfjsLib); };
+    if (window.pdfjsLib) return ready();
+    const s = document.createElement("script");
+    s.src = PDFJS_BASE + "pdf.min.js";
+    s.onload = () => window.pdfjsLib ? ready() : reject(new UserError("The page-drawing engine didn't start. Reload the page and try again."));
+    s.onerror = () => { pdfjsReady = null; reject(new UserError("The page-drawing engine didn't load. Check your internet connection and try again.")); };
+    document.head.appendChild(s);
+  });
+  return pdfjsReady;
 }
 
-async function mergePdfs(files, progress) {
-  const { PDFDocument } = PDFLib;
-  const out = await PDFDocument.create();
-  let pages = 0;
-  for (let i = 0; i < files.length; i++) {
-    const f = files[i];
-    progress(i / files.length, `Adding ${f.name} (${i + 1} of ${files.length})`);
-    await tick();
-    let src;
-    try { src = await loadSource(new Uint8Array(await f.arrayBuffer())); }
-    catch (e) { throw new UserError(`“${f.name}”: ${e instanceof UserError ? e.message : "couldn't be read."}`); }
-    unhookPageLinks(src);
-    const copied = await out.copyPages(src, src.getPageIndices());
-    copied.forEach(p => out.addPage(p));
-    pages += copied.length;
-  }
-  progress(0.97, "Writing the merged PDF");
+async function flattenPdf(bytes, limitBytes, baseName, progress, opt) {
+  const { PDFDocument, PDFName, pushGraphicsState, popGraphicsState, concatTransformationMatrix, drawObject } = PDFLib;
+  progress(0.01, "Loading the page-drawing engine");
+  const pdfjs = await loadPdfJs();
+  progress(0.03, "Reading the PDF");
   await tick();
-  out.setProducer("PDF Toolkit");
-  const bytes = await out.save({ useObjectStreams: true, addDefaultPage: false, updateFieldAppearances: false });
-  return { bytes, pages };
-}
-
-// ---- Canva-safe mode: render each slide to a 4K picture, then group pictures into parts ----
-const PDFJS = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
-function loadScript(src) {
-  return new Promise((res, rej) => { const el = document.createElement("script"); el.src = src; el.onload = res; el.onerror = () => rej(new UserError("Couldn't load the page renderer. Check your internet connection and try again.")); document.head.appendChild(el); });
-}
-async function ensurePdfJs() {
-  if (window.pdfjsLib) return;
-  await loadScript(PDFJS + "pdf.worker.min.js");   // runs the renderer on this page
-  await loadScript(PDFJS + "pdf.min.js");
-  window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + "pdf.worker.min.js";
-}
-
-function addPicturePage(doc, data, filter, W, H, pw, ph) {
-  const { pushGraphicsState, popGraphicsState, concatTransformationMatrix, drawObject } = PDFLib;
-  const ctx = doc.context;
-  const ref = ctx.register(ctx.stream(data, { Type: "XObject", Subtype: "Image", Width: W, Height: H, ColorSpace: "DeviceRGB", BitsPerComponent: 8, Filter: filter }));
-  const page = doc.addPage([pw, ph]);
-  const name = page.node.newXObject("Im", ref);
-  page.pushOperators(pushGraphicsState(), concatTransformationMatrix(pw, 0, 0, ph, 0, 0), drawObject(name), popGraphicsState());
-}
-
-async function splitAsPictures(bytes, limitBytes, baseName, lossless, progress, onPart) {
-  const { PDFDocument } = PDFLib;
-  progress(0.01, "Loading the page renderer");
-  await ensurePdfJs();
-  let pdf;
-  try { pdf = await window.pdfjsLib.getDocument({ data: bytes, isEvalSupported: false, disableFontFace: true, useSystemFonts: false, verbosity: 0 }).promise; }
-  catch (e) {
+  let doc;
+  try {
+    doc = await pdfjs.getDocument({ data: bytes, cMapUrl: PDFJS_EXTRAS + "cmaps/", cMapPacked: true, standardFontDataUrl: PDFJS_EXTRAS + "standard_fonts/" }).promise;
+  } catch (e) {
     if (e && e.name === "PasswordException") throw new UserError("This PDF is password-protected. Remove the protection first, then try again.");
     throw new UserError("This file couldn't be read as a PDF. It may be damaged or not a PDF at all.");
   }
-  const n = pdf.numPages, budget = limitBytes * 0.985, parts = [];
-  let cur = null;
-  const finish = async () => {
-    progress((cur.end) / n, `Saving part ${parts.length + 1}`);
-    const out = await cur.doc.save({ useObjectStreams: true, addDefaultPage: false });
-    const part = { start: cur.start, end: cur.end, bytes: out, over: out.length > limitBytes };
-    parts.push(part); onPart && onPart(part, parts.length);
-    cur = null;
-  };
-  for (let i = 1; i <= n; i++) {
-    progress((i - 1) / n, `Drawing slide ${i} of ${n}`);
-    const page = await pdf.getPage(i);
-    const vp1 = page.getViewport({ scale: 1 });
-    let scale = 3840 / Math.max(vp1.width, vp1.height);
-    scale = Math.min(scale, Math.sqrt(16.5e6 / (vp1.width * vp1.height)));
-    const vp = page.getViewport({ scale });
-    const W = Math.max(1, Math.round(vp.width)), H = Math.max(1, Math.round(vp.height));
-    const canvas = document.createElement("canvas");
-    canvas.width = W; canvas.height = H;
-    const cx = canvas.getContext("2d", { willReadFrequently: lossless });
-    cx.fillStyle = "#fff"; cx.fillRect(0, 0, W, H);
-    await page.render({ canvasContext: cx, viewport: vp, background: "rgb(255,255,255)" }).promise;
-    let data, filter;
-    if (lossless) {
-      const px = cx.getImageData(0, 0, W, H).data;
-      const rgb = new Uint8Array(W * H * 3);
-      for (let p = 0, q = 0; p < px.length; p += 4, q += 3) { rgb[q] = px[p]; rgb[q + 1] = px[p + 1]; rgb[q + 2] = px[p + 2]; }
-      data = pako.deflate(rgb, { level: 6 }); filter = "FlateDecode";
-    } else {
-      const blob = await new Promise(r => canvas.toBlob(r, "image/jpeg", 0.95));
-      data = new Uint8Array(await blob.arrayBuffer()); filter = "DCTDecode";
+  const n = doc.numPages;
+  if (!n) throw new UserError("This PDF has no pages.");
+  const budget = limitBytes * 0.985;
+  const parts = [];
+  let waiting = [], size = 2000, start = 0, dpiLow = Infinity, dpiHigh = 0;
+  const writePart = async (end) => {
+    const out = await PDFDocument.create();
+    for (const p of waiting) {
+      const dict = { Type: "XObject", Subtype: "Image", Width: p.W, Height: p.H, BitsPerComponent: 8, ColorSpace: "DeviceRGB", Filter: "DCTDecode" };
+      if (opt.smooth) dict.Interpolate = true;
+      const ref = out.context.register(out.context.stream(p.jpg, dict));
+      const page = out.addPage([p.w, p.h]);
+      const name = page.node.newXObject("Page", ref);
+      page.pushOperators(pushGraphicsState(), concatTransformationMatrix(p.w, 0, 0, p.h, 0, 0), drawObject(name), popGraphicsState());
     }
-    canvas.width = canvas.height = 0;
-    page.cleanup();
-    const cost = data.length + 1200;
-    if (cur && cur.end > cur.start && cur.size + cost > budget) await finish();
-    if (!cur) { const doc = await PDFDocument.create(); doc.setTitle(`${baseName} (part ${parts.length + 1})`); doc.setProducer("PDF Splitter"); cur = { doc, start: i - 1, end: i - 1, size: 3000 }; }
-    addPicturePage(cur.doc, data, filter, W, H, vp1.width, vp1.height);
-    cur.size += cost; cur.end = i;
+    if (opt.marker) addTextMarker(out);
+    out.setTitle(`${baseName} (part ${parts.length + 1})`);
+    out.setProducer("PDF Splitter");
+    const data = await out.save({ useObjectStreams: true, addDefaultPage: false });
+    parts.push({ start, end, bytes: data, over: data.length > limitBytes });
+    waiting = []; size = 2000; start = end;
+  };
+  const canvas = document.createElement("canvas");
+  for (let i = 1; i <= n; i++) {
+    progress(0.04 + 0.95 * (i - 1) / n, `Drawing page ${i} of ${n}`);
     await tick();
+    const page = await doc.getPage(i);
+    const base = page.getViewport({ scale: 1 });
+    const scale = Math.min(opt.longSide / Math.max(base.width, base.height), Math.sqrt(16e6 / (base.width * base.height)));
+    const view = page.getViewport({ scale });
+    canvas.width = Math.max(1, Math.round(view.width)); canvas.height = Math.max(1, Math.round(view.height));
+    const g = canvas.getContext("2d", { alpha: false });
+    g.fillStyle = "#ffffff"; g.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: g, viewport: view, background: "#ffffff" }).promise;
+    const blob = await new Promise(res => canvas.toBlob(res, "image/jpeg", 0.92));
+    if (!blob) throw new UserError(`Page ${i} is too large to draw in this browser. Try the standard setting, or use Chrome on a computer.`);
+    const jpg = new Uint8Array(await blob.arrayBuffer());
+    page.cleanup();
+    const dpi = scale * 72; dpiLow = Math.min(dpiLow, dpi); dpiHigh = Math.max(dpiHigh, dpi);
+    if (waiting.length && size + jpg.length + 700 > budget) await writePart(i - 1);
+    waiting.push({ jpg, W: canvas.width, H: canvas.height, w: base.width, h: base.height });
+    size += jpg.length + 700;
   }
-  if (cur) await finish();
-  await pdf.destroy();
+  await writePart(n);
+  canvas.width = canvas.height = 0;
+  try { await doc.destroy(); } catch {}
   progress(1, "Done");
-  return { parts, pages: n };
+  return { parts, pages: n, flat: { dpiLow: Math.round(dpiLow), dpiHigh: Math.round(dpiHigh) } };
 }
 // ============ ENGINE END ============
 
 const $ = id => document.getElementById(id);
 const fmt = b => b >= 1e9 ? (b / 1e9).toFixed(2) + " GB" : b >= 1e6 ? (b / 1e6).toFixed(1) + " MB" : (b / 1e3).toFixed(0) + " KB";
-let file = null, parts = [], busy = false, lastMode = "original";
+let file = null, parts = [], busy = false;
 
 function setFile(f) {
   if (!f) return;
@@ -462,34 +1205,29 @@ const drop = $("drop");
 ["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
 ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
 drop.addEventListener("drop", e => setFile(e.dataTransfer.files[0]));
-document.querySelectorAll('input[name=mode]').forEach(r => r.addEventListener("change", () => {
-  $("qualityBox").classList.toggle("show", document.querySelector('input[name=mode]:checked').value === "canva");
-}));
 function showError(msg) { $("error").textContent = msg; $("error").classList.add("show"); }
 function hideError() { $("error").classList.remove("show"); }
 const baseName = () => file.name.replace(/\.pdf$/i, "");
-const partName = (p, i, total) => `${baseName()}${lastMode === "canva" ? " - Canva" : ""} - Part ${i} of ${total} (pages ${p.start + 1}-${p.end}).pdf`;
+const partName = (p, i, total) => `${baseName()} - Part ${i} of ${total} (pages ${p.start + 1}-${p.end}).pdf`;
 
 $("go").addEventListener("click", async () => {
   if (!file || busy) return;
   if (typeof PDFLib === "undefined") { showError("The PDF engine didn't load. Check your internet connection and reload the page."); return; }
   const mb = parseFloat($("limit").value);
   if (!(mb > 0)) { showError("Enter a part size in MB, for example 20."); return; }
-  const mode = document.querySelector('input[name=mode]:checked').value;
-  const lossless = document.querySelector('input[name=quality]:checked').value === "lossless";
-  if (mode === "original" && file.size <= mb * 1e6) { showError(`This file is already ${fmt(file.size)}, which is under ${mb} MB. No need to split it.`); return; }
+  if ($("mode").value === "copy" && !$("enhance").value && !$("smooth").checked && file.size <= mb * 1e6) { showError(`This file is already ${fmt(file.size)}, which is under ${mb} MB. No need to split it.`); return; }
   busy = true; $("go").disabled = true; hideError();
   $("result").innerHTML = ""; $("work").classList.add("show");
   try {
     $("status").textContent = "Loading file into memory";
     const input = new Uint8Array(await file.arrayBuffer());
-    const prog = (p, m) => { $("progressFill").style.width = (p * 100) + "%"; $("status").textContent = m; };
-    const res = mode === "canva"
-      ? await splitAsPictures(input, mb * 1e6, baseName(), lossless, prog)
-      : await splitPdf(input, mb * 1e6, baseName(), prog);
-    lastMode = mode;
+    const onProgress = (p, m) => { $("progressFill").style.width = (p * 100) + "%"; $("status").textContent = m; };
+    const mode = $("mode").value;
+    const res = mode === "copy" || mode === "outline"
+      ? await splitPdf(input, mb * 1e6, baseName(), onProgress, null, $("smooth").checked, $("enhance").value, mode === "outline", $("marker").checked)
+      : await flattenPdf(input, mb * 1e6, baseName(), onProgress, { longSide: mode === "flat-high" ? 3300 : 2200, smooth: $("smooth").checked, marker: $("marker").checked });
     parts = res.parts.map(p => ({ ...p, blob: new Blob([p.bytes], { type: "application/pdf" }), bytes: null }));
-    render(res.pages, mb);
+    render(res.pages, mb, res);
   } catch (e) {
     console.error(e);
     $("work").classList.remove("show");
@@ -500,12 +1238,68 @@ $("go").addEventListener("click", async () => {
   } finally { busy = false; $("go").disabled = !file; }
 });
 
-function render(pageCount, mb) {
+function qualityNote(q, c) {
+  const lines = [];
+  if (q && q.count) {
+    const zoom = Math.max(100, Math.round(q.median / 96 * 10) * 10);
+    const grade = q.median < 150 ? `That is screen quality, so pictures turn soft when you zoom in past about ${zoom}%.`
+      : q.median < 250 ? `That is medium quality: pictures stay sharp up to about ${zoom}% zoom.`
+      : `That is print quality: pictures stay sharp up to about ${zoom}% zoom.`;
+    lines.push(`<b>Picture quality in the file you chose:</b> the main pictures are stored at about ${q.median} dots per inch`
+      + (q.min !== q.max ? ` (pages range from ${q.min} to ${q.max})` : "")
+      + `, for example ${q.example.w} × ${q.example.h} pixels on page ${q.example.page}. ${grade}`);
+  } else if (q) {
+    lines.push(`<b>Picture quality in the file you chose:</b> the pages are mostly text and drawings, which stay sharp at any zoom.`);
+  }
+  if (c && c.sharpened) lines.push(`<b>Sharpened:</b> ${c.sharpened} low-resolution pictures had their edges sharpened, so they look crisper when zoomed.`);
+  if (c && !c.failed && c.total) {
+    const which = c.sharpened ? `the other ${c.total} pictures` : `all ${c.total} pictures`;
+    lines.push(c.same === c.total
+      ? `<b>Checked after building:</b> ${which} in the parts are identical to the ones in your file.`
+      : `<b>Checked after building:</b> ${c.total - c.same} of ${c.total} pictures did not come through identical. Please report this file.`);
+  }
+  if (q && q.count && q.median < 150) lines.push(c && c.sharpened
+    ? `<b>Keep in mind:</b> sharpening makes edges crisper but cannot add detail. For truly sharp slides, start from a sharper file. From Canva, download as PDF Print (300 dpi) instead of PDF Standard (96 dpi).`
+    : `<b>For sharper parts:</b> start from a sharper file. From Canva, download as PDF Print (300 dpi) instead of PDF Standard (96 dpi).`);
+  return lines.join("<br>");
+}
+
+function textNote(t) {
+  if (!t) return "";
+  const done = t.pages - t.pagesWithText;
+  let s = `<b>Text as shapes:</b> on ${done} of ${t.pages} pages, all text was redrawn as its exact letter shapes. It looks the same and stays sharp at any zoom, and Canva has no text there to re-type. It can no longer be edited, selected or searched.`;
+  if (t.pagesWithText) s += ` <b>${t.pagesWithText} ${t.pagesWithText === 1 ? "page still contains" : "pages still contain"} ordinary text</b>, because the fonts there are of a kind this tool cannot convert. Canva may still change the text on those pages.`;
+  return s + "<br>";
+}
+
+function flatNote(f) {
+  const dpi = f.dpiLow === f.dpiHigh ? `about ${f.dpiLow}` : `${f.dpiLow} to ${f.dpiHigh}`;
+  return `<b>Pages locked as pictures:</b> each page was drawn exactly as a PDF viewer shows it, at ${dpi} dots per inch, and saved as one picture. `
+    + `Canva and other editors cannot move, reflow or re-type anything on these pages.<br>`
+    + `<b>Keep in mind:</b> text on these pages can no longer be edited, selected or searched, and links no longer work.`;
+}
+
+const MODE_HELP = {
+  outline: "Pages are copied as they are, with every picture untouched. Only the text is redrawn as its exact letter shapes, taken from the fonts inside your PDF. It looks the same and stays sharp at any zoom, but Canva has no text left to re-type or move. The text can no longer be edited, selected or searched.",
+  flat: "Each page is drawn exactly as a PDF viewer shows it and saved as one picture. Canva rebuilds a normal PDF page when importing, which can shift or change text; a picture cannot be changed. Text is no longer editable or searchable.",
+  "flat-high": "The same, drawn with about twice as many pixels. Text stays sharper when zoomed, but parts are bigger and heavier to scroll.",
+  copy: "Pages are copied as they are in your PDF, with real text. Best for reading and searching. Canva may shift or change text when importing such pages.",
+};
+function syncMode() {
+  const m = $("mode").value;
+  $("modeHelp").textContent = MODE_HELP[m];
+  $("enhanceRow").style.display = m === "copy" || m === "outline" ? "" : "none";
+  $("markerRow").style.display = m === "copy" ? "none" : "";
+}
+$("mode").addEventListener("change", syncMode);
+syncMode();
+
+function render(pageCount, mb, res) {
   const total = parts.length;
   const overs = parts.filter(p => p.over);
-  $("status").textContent = lastMode === "canva"
-    ? `${pageCount} slides turned into 4K pictures, in ${total} part${total > 1 ? "s" : ""}. Ready to import into Canva.`
-    : `${pageCount} pages split into ${total} parts. Every slide unchanged.`;
+  $("status").textContent = `${pageCount} pages split into ${total === 1 ? "1 part" : total + " parts"}. ` + (res.flat ? "Every page locked as one picture."
+    : res.text ? "Text redrawn as shapes, " + (res.checked.sharpened ? `${res.checked.sharpened} blurry pictures sharpened.` : "pictures untouched.")
+    : res.checked.sharpened ? `${res.checked.sharpened} blurry pictures sharpened.` : "No picture re-compressed or resized.");
   const strip = parts.map((p, i) => `<div id="seg${i}" class="${p.over ? "over" : ""}" style="flex:${p.blob.size}" title="Part ${i + 1}: ${fmt(p.blob.size)}"></div>`).join("");
   const rows = parts.map((p, i) => `
     <li id="row${i}" class="${p.over ? "over" : ""}">
@@ -514,165 +1308,22 @@ function render(pageCount, mb) {
       <button class="ghost" data-i="${i}">Download</button>
     </li>`).join("");
   $("result").innerHTML = `
-    <p class="verdict">${total} part${total > 1 ? "s" : ""} ready</p>
+    <p class="verdict">${total === 1 ? "1 part ready" : total + " parts ready"}</p>
+    <p class="quality">${res.flat ? flatNote(res.flat) : textNote(res.text) + qualityNote(res.quality, res.checked)}</p>
     <div class="strip" aria-hidden="true">${strip}</div>
-    <div class="actions" style="margin:0 0 16px"><button id="all">Download all ${total} parts as ZIP</button></div>
+    <div class="actions" style="margin:0 0 16px"><button id="all">${total === 1 ? "Download the part" : "Download all " + total + " parts"}</button></div>
     <ul class="parts">${rows}</ul>
-    ${overs.length ? `<p class="status" style="margin-top:14px;color:var(--warn)">${overs.length === 1 ? "One slide is" : overs.length + " slides are"} bigger than ${mb} MB by ${overs.length === 1 ? "itself" : "themselves"}. ${lastMode === "canva" ? "Choose “Looks identical” instead of “Pixel-perfect” to make them smaller." : "They can't be split smaller without changing the slide."}</p>` : ""}`;
+    ${overs.length ? `<p class="status" style="margin-top:14px;color:var(--warn)">${overs.length === 1 ? "One slide is" : overs.length + " slides are"} bigger than ${mb} MB by ${overs.length === 1 ? "itself" : "themselves"}. They can't be split smaller without changing the slide.</p>` : ""}`;
   $("result").querySelectorAll("button[data-i]").forEach(b => b.addEventListener("click", () => savePart(+b.dataset.i)));
-  $("all").addEventListener("click", saveZip);
-}
-
-async function saveZip() {
-  const btn = $("all");
-  if (typeof JSZip === "undefined") { showError("The ZIP tool didn't load. Check your internet connection and reload, or download the parts one by one."); return; }
-  btn.disabled = true; hideError();
-  const label = btn.textContent;
-  try {
-    const zip = new JSZip();
-    parts.forEach((p, i) => zip.file(partName(p, i + 1, parts.length), p.blob, { binary: true }));
-    // PDFs are already compressed, so store them as-is: fast and nothing changes
-    const blob = await zip.generateAsync({ type: "blob", compression: "STORE", streamFiles: true },
-      m => { btn.textContent = `Preparing ZIP… ${Math.round(m.percent)}%`; });
-    btn.textContent = label;
-    const name = `${baseName()} - ${parts.length} parts.zip`;
-    const dl = await getDownloads();
-    if (dl) {
-      try { await dl.save({ filename: name, data: blob }); }
-      catch (e) {
-        if (e && e.code === "declined") return;
-        if (e && e.code === "rate_limited") { showError("A save prompt is already open. Finish that one first."); return; }
-        if (e && e.code === "too_large") { showError("The ZIP is too large to save in this app. Download the parts one by one, or open the page in a desktop browser."); return; }
-        showError("Saving isn't available in this view. Open the page in a desktop browser to download the ZIP.");
-        return;
-      }
-    } else {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url; a.download = name;
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 120000);
+  $("all").addEventListener("click", async () => {
+    $("all").disabled = true;
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i].saved) continue;
+      const ok = await savePart(i);
+      if (ok === "stop") break;
     }
-    parts.forEach((p, i) => { p.saved = true; $("row" + i).classList.add("saved"); $("row" + i).querySelector("button").textContent = "Downloaded"; $("seg" + i).classList.add("done"); });
-  } catch (e) {
-    console.error(e);
-    showError("The ZIP couldn't be created, most likely because the browser ran out of memory. Download the parts one by one instead.");
-  } finally { btn.textContent = label; btn.disabled = false; }
-}
-
-// ---------- Tabs ----------
-const COPY = {
-  split: ["Split a big PDF into\u00a0parts that fit.", document.getElementById("lede").textContent],
-  merge: ["Join PDFs into one, exactly as they are.", "Add your files, put them in order, and merge. Every page is copied without any change. Everything runs in your browser."]
-};
-function showTab(name) {
-  for (const t of ["split", "merge"]) {
-    const on = t === name;
-    $("tab-" + t).setAttribute("aria-selected", on);
-    $("panel-" + t).hidden = !on;
-  }
-  $("headline").textContent = COPY[name][0];
-  $("lede").textContent = COPY[name][1];
-  hideError();
-}
-$("tab-split").addEventListener("click", () => showTab("split"));
-$("tab-merge").addEventListener("click", () => showTab("merge"));
-document.querySelector(".tabs").addEventListener("keydown", e => {
-  if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
-    const next = $("tab-split").getAttribute("aria-selected") === "true" ? "merge" : "split";
-    showTab(next); $("tab-" + next).focus();
-  }
-});
-
-// ---------- Merge ----------
-let mfiles = [], mresult = null, mbusy = false;
-const esc = t => t.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-function addMergeFiles(list) {
-  const pdfs = [...list].filter(f => /\.pdf$/i.test(f.name) || f.type === "application/pdf");
-  if (pdfs.length < list.length) showError("Some files were skipped because they aren't PDFs."); else hideError();
-  mfiles.push(...pdfs); mresult = null; renderMerge();
-}
-function renderMerge() {
-  $("mlist").innerHTML = mfiles.map((f, i) => `
-    <li>
-      <span class="nm"><b title="${esc(f.name)}">${esc(f.name)}</b><small>${fmt(f.size)}</small></span>
-      <span class="ctl">
-        <button data-a="up" data-i="${i}" aria-label="Move ${esc(f.name)} up" ${i === 0 ? "disabled" : ""}>↑</button>
-        <button data-a="down" data-i="${i}" aria-label="Move ${esc(f.name)} down" ${i === mfiles.length - 1 ? "disabled" : ""}>↓</button>
-        <button data-a="rm" data-i="${i}" aria-label="Remove ${esc(f.name)}">Remove</button>
-      </span>
-    </li>`).join("");
-  const total = mfiles.reduce((a, f) => a + f.size, 0);
-  $("mtotal").textContent = mfiles.length === 0 ? "" : mfiles.length === 1 ? "Add at least one more PDF to merge." : `${mfiles.length} files, ${fmt(total)} in total`;
-  $("mgo").disabled = mfiles.length < 2 || mbusy;
-  $("mclear").hidden = mfiles.length === 0;
-  if (!mresult) $("mwork").classList.remove("show");
-}
-$("mlist").addEventListener("click", e => {
-  const b = e.target.closest("button[data-a]"); if (!b || mbusy) return;
-  const i = +b.dataset.i, a = b.dataset.a;
-  if (a === "rm") mfiles.splice(i, 1);
-  else { const j = a === "up" ? i - 1 : i + 1; [mfiles[i], mfiles[j]] = [mfiles[j], mfiles[i]]; }
-  mresult = null; renderMerge();
-  const again = $("mlist").querySelector(`button[data-a="${a}"][data-i="${a === "up" ? i - 1 : a === "down" ? i + 1 : i}"]`);
-  if (again && !again.disabled) again.focus();
-});
-$("mfile").addEventListener("change", e => { addMergeFiles(e.target.files); e.target.value = ""; });
-const mdrop = $("mdrop");
-["dragenter", "dragover"].forEach(ev => mdrop.addEventListener(ev, e => { e.preventDefault(); mdrop.classList.add("over"); }));
-["dragleave", "drop"].forEach(ev => mdrop.addEventListener(ev, e => { e.preventDefault(); mdrop.classList.remove("over"); }));
-mdrop.addEventListener("drop", e => addMergeFiles(e.dataTransfer.files));
-$("mclear").addEventListener("click", () => { mfiles = []; mresult = null; renderMerge(); });
-
-$("mgo").addEventListener("click", async () => {
-  if (mfiles.length < 2 || mbusy) return;
-  if (typeof PDFLib === "undefined") { showError("The PDF engine didn't load. Check your internet connection and reload the page."); return; }
-  mbusy = true; $("mgo").disabled = true; hideError();
-  $("mresult").innerHTML = ""; $("mwork").classList.add("show");
-  try {
-    const res = await mergePdfs(mfiles, (p, m) => { $("mprogressFill").style.width = (p * 100) + "%"; $("mstatus").textContent = m; });
-    $("mprogressFill").style.width = "100%";
-    const name = mfiles[0].name.replace(/\.pdf$/i, "") + " - merged.pdf";
-    mresult = { blob: new Blob([res.bytes], { type: "application/pdf" }), name };
-    $("mstatus").textContent = `${mfiles.length} files joined, ${res.pages} pages in total. Every page unchanged.`;
-    $("mresult").innerHTML = `
-      <p class="verdict">Merged PDF ready — ${fmt(mresult.blob.size)}</p>
-      <div class="actions" style="margin-top:0">
-        <button id="msave">Download merged PDF</button>
-        <button class="ghost" id="mtosplit">Split this file</button>
-      </div>`;
-    $("msave").addEventListener("click", () => saveBlob(mresult.blob, mresult.name));
-    $("mtosplit").addEventListener("click", () => {
-      setFile(new File([mresult.blob], mresult.name, { type: "application/pdf" }));
-      showTab("split"); $("go").focus();
-    });
-    $("msave").focus();
-  } catch (e) {
-    console.error(e);
-    $("mwork").classList.remove("show");
-    showError(e instanceof UserError ? e.message
-      : (e && /memory|allocation|Array buffer/i.test(String(e.message)))
-        ? "The browser ran out of memory. Close other tabs and try again, or merge fewer files at a time."
-        : "Merging failed: " + (e && e.message ? e.message : e) + ".");
-  } finally { mbusy = false; $("mgo").disabled = mfiles.length < 2; }
-});
-
-async function saveBlob(blob, name) {
-  const dl = await getDownloads();
-  if (dl) {
-    try { await dl.save({ filename: name, data: blob }); return true; }
-    catch (e) {
-      if (e && e.code === "declined") return false;
-      if (e && e.code === "rate_limited") { showError("A save prompt is already open. Finish that one first."); return false; }
-      if (e && e.code === "too_large") { showError("This file is too large to save in this app. Open the page in a desktop browser."); return false; }
-      showError("Saving isn't available in this view. Open the page in a desktop browser to download the file.");
-      return false;
-    }
-  }
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a"); a.href = url; a.download = name;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 120000);
-  return true;
+    $("all").disabled = false;
+  });
 }
 
 let downloadsP = null;
